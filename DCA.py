@@ -500,7 +500,7 @@ if 'analisis_iniciado' in st.session_state and st.session_state.analisis_iniciad
                 
                 if len(fechas_comunes) == 0:
                     st.error("No hay fechas comunes entre los activos seleccionados")
-                    return
+                else:
                 
                 fechas_comunes = sorted(fechas_comunes)
                 
