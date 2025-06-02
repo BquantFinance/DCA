@@ -1,3 +1,5 @@
 plotly
 yfinance
 streamlit
+pandas
+numpy
