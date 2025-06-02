@@ -90,7 +90,7 @@ def descargar_datos_yfinance(tickers, fecha_inicio, fecha_fin):
             if len(tickers) == 1:
                 datos.columns = pd.MultiIndex.from_product([datos.columns, [tickers[0]]])
             
-            precios = datos['Adj Close'].fillna(method='ffill').fillna(method='bfill')
+            precios = datos['Close'].fillna(method='ffill').fillna(method='bfill')
             return precios
     except Exception as e:
         st.error(f"❌ Error descargando datos: {str(e)}")
