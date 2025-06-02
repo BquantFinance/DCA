@@ -86,7 +86,7 @@ def descargar_datos_yfinance(tickers, fecha_inicio, fecha_fin):
     """Descarga datos históricos de Yahoo Finance"""
     try:
         with st.spinner(f"🔄 Descargando datos de {len(tickers)} activos..."):
-            datos = yf.download(tickers, start=fecha_inicio, end=fecha_fin, progress=False)
+            datos = yf.download(tickers, start=fecha_inicio, end=fecha_fin, progress=False, multi_level_index=False)
             if len(tickers) == 1:
                 datos.columns = pd.MultiIndex.from_product([datos.columns, [tickers[0]]])
             
