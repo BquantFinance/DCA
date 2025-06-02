@@ -10,7 +10,7 @@ import json
 
 # Configuración de la página
 st.set_page_config(
-    page_title="BQuant-DCA Evolution Visualizer",
+    page_title="DCA Evolution Visualizer",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -58,7 +58,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Título principal con estilo
-st.markdown('<h1 class="main-header">📈 BQuant-DCA Evolution Visualizer</h1>', unsafe_allow_html=True)
+st.markdown('<h1 class="main-header">📈 DCA Evolution Visualizer</h1>', unsafe_allow_html=True)
 st.markdown('<p class="sub-header">Visualiza la evolución día a día de tu estrategia Dollar Cost Averaging</p>', unsafe_allow_html=True)
 
 # Diccionario de activos con colores vibrantes
@@ -304,7 +304,7 @@ if 'analisis_iniciado' in st.session_state and st.session_state.analisis_iniciad
             st.markdown("## 📈 Evolución de Rentabilidad DCA")
             
             # Controles de animación
-            col1, col2, col3, col4 = st.columns([1, 1, 1, 2])
+            col1, col2, col3 = st.columns([1, 1, 1])
             
             with col1:
                 if st.button("▶️ Reproducir", type="primary"):
@@ -318,15 +318,12 @@ if 'analisis_iniciado' in st.session_state and st.session_state.analisis_iniciad
                 if st.button("📊 Ver Final"):
                     st.session_state.mostrar_final = True
             
-            with col4:
-                mostrar_valores = st.checkbox("💵 Mostrar valores en $", value=False)
-            
             # Área del gráfico
             chart_container = st.empty()
             info_container = st.empty()
             
             # Función para crear gráfico animado
-            def crear_grafico_animado(hasta_fecha=None, mostrar_valores_abs=False):
+            def crear_grafico_animado(hasta_fecha=None):
                 fig = go.Figure()
                 
                 # Determinar datos a mostrar
@@ -347,20 +344,10 @@ if 'analisis_iniciado' in st.session_state and st.session_state.analisis_iniciad
                         color = ACTIVOS_PREDEFINIDOS.get(ticker, {}).get('color', '#1f77b4')
                         emoji = ACTIVOS_PREDEFINIDOS.get(ticker, {}).get('emoji', '📈')
                         
-                        # Datos a mostrar (rentabilidad o valores absolutos)
-                        if mostrar_valores_abs and ticker in valores_portfolio:
-                            if hasta_fecha:
-                                y_data = valores_portfolio[ticker].loc[valores_portfolio[ticker].index <= hasta_fecha]
-                            else:
-                                y_data = valores_portfolio[ticker]
-                            y_title = "Valor Portfolio ($)"
-                            hover_format = "$%{y:,.0f}"
-                            yaxis_format = ".0f"
-                        else:
-                            y_data = datos_ticker
-                            y_title = "Rentabilidad Acumulada (%)"
-                            hover_format = "%{y:.1f}%"
-                            yaxis_format = ".1f"
+                        # Siempre mostrar en porcentajes
+                        y_data = datos_ticker
+                        y_title = "Rentabilidad Acumulada (%)"
+                        hover_format = "%{y:.1f}%"
                         
                         # Limpiar datos para evitar valores extraños
                         y_data_clean = y_data.dropna()
@@ -380,7 +367,7 @@ if 'analisis_iniciado' in st.session_state and st.session_state.analisis_iniciad
                             ),
                             hovertemplate=f'<b>{ticker}</b><br>' +
                                         'Fecha: %{x|%d/%m/%Y}<br>' +
-                                        f'Valor: {hover_format}<br>' +
+                                        f'Rentabilidad: {hover_format}<br>' +
                                         '<extra></extra>',
                             connectgaps=True
                         ))
@@ -412,28 +399,13 @@ if 'analisis_iniciado' in st.session_state and st.session_state.analisis_iniciad
                                             showlegend=False,
                                             hovertemplate=f'<b>{ticker} - Compra Mensual</b><br>' +
                                                         'Fecha: %{x|%d/%m/%Y}<br>' +
-                                                        f'Valor: {hover_format}<br>' +
+                                                        f'Rentabilidad: {hover_format}<br>' +
                                                         f'💰 ${st.session_state.inversion_analisis:,} invertidos<br>' +
                                                         '<extra></extra>'
                                         ))
                 
                 # Configurar layout mejorado
                 template = "plotly_dark" if tema_oscuro else "plotly_white"
-                
-                # Configurar formato del eje Y basado en los datos
-                if mostrar_valores_abs:
-                    yaxis_config = dict(
-                        tickformat="$,.0f",
-                        showgrid=mostrar_grid,
-                        gridcolor='rgba(128,128,128,0.2)'
-                    )
-                else:
-                    yaxis_config = dict(
-                        tickformat=".1f",
-                        ticksuffix="%",
-                        showgrid=mostrar_grid,
-                        gridcolor='rgba(128,128,128,0.2)'
-                    )
                 
                 fig.update_layout(
                     title=dict(
@@ -460,7 +432,12 @@ if 'analisis_iniciado' in st.session_state and st.session_state.analisis_iniciad
                         gridcolor='rgba(128,128,128,0.2)',
                         tickformat='%b %Y'
                     ),
-                    yaxis=yaxis_config,
+                    yaxis=dict(
+                        tickformat=".1f",
+                        ticksuffix="%",
+                        showgrid=mostrar_grid,
+                        gridcolor='rgba(128,128,128,0.2)'
+                    ),
                     plot_bgcolor='rgba(0,0,0,0)',
                     paper_bgcolor='rgba(0,0,0,0)',
                     margin=dict(l=60, r=60, t=80, b=60)
@@ -500,189 +477,214 @@ if 'analisis_iniciado' in st.session_state and st.session_state.analisis_iniciad
                 else:
                     fechas_comunes = sorted(fechas_comunes)
                     
-                    # Crear interpolación suave para animación fluida
-                    st.info("🎬 Preparando animación suave...")
+                    # Animación ultra-fluida con menos redraws
+                    st.info("🎬 Iniciando animación ultra-fluida...")
                     
-                    # Reducir fechas para mejor performance pero mantener suavidad
-                    step = max(1, len(fechas_comunes) // 100)  # Máximo 100 puntos clave
+                    # Preparar datos de animación de forma más eficiente
+                    step = max(1, len(fechas_comunes) // 60)  # Solo 60 puntos clave para máxima fluidez
                     fechas_clave = fechas_comunes[::step]
                     if fechas_comunes[-1] not in fechas_clave:
                         fechas_clave.append(fechas_comunes[-1])
                     
-                    # Crear interpolación entre fechas clave para suavidad
-                    todas_fechas_interpoladas = []
-                    datos_interpolados = {ticker: [] for ticker in rentabilidades.keys()}
+                    # Pre-calcular todos los datos para evitar cálculos durante la animación
+                    datos_precalculados = {}
+                    for ticker in rentabilidades.keys():
+                        datos_precalculados[ticker] = []
+                        for fecha in fechas_clave:
+                            valor = rentabilidades[ticker].loc[
+                                rentabilidades[ticker].index <= fecha
+                            ].iloc[-1] if len(rentabilidades[ticker].loc[
+                                rentabilidades[ticker].index <= fecha
+                            ]) > 0 else 0
+                            datos_precalculados[ticker].append(valor)
                     
-                    for i in range(len(fechas_clave) - 1):
-                        fecha_actual = fechas_clave[i]
-                        fecha_siguiente = fechas_clave[i + 1]
+                    # Crear contenedores fijos para evitar redespliegue
+                    progress_container = st.empty()
+                    chart_container_fixed = st.empty()
+                    
+                    # Usar menos frames pero con transiciones CSS suaves
+                    total_frames = len(fechas_clave) * 3  # 3 sub-frames por fecha clave
+                    progress_bar = progress_container.progress(0)
+                    
+                    for i in range(total_frames):
+                        # Calcular posición suave entre fechas clave
+                        fecha_idx = i // 3
+                        sub_frame = i % 3
                         
-                        # Crear 5 frames intermedios entre cada fecha clave
-                        frames_intermedios = 5
+                        if fecha_idx >= len(fechas_clave) - 1:
+                            fecha_idx = len(fechas_clave) - 1
+                            sub_frame = 2
                         
-                        for frame in range(frames_intermedios + 1):
-                            # Interpolación temporal
-                            factor = frame / frames_intermedios
-                            
-                            # Fecha interpolada (aunque esto es más conceptual)
-                            diff_dias = (fecha_siguiente - fecha_actual).days
-                            dias_interpolados = int(diff_dias * factor)
-                            fecha_interpolada = fecha_actual + timedelta(days=dias_interpolados)
-                            
-                            todas_fechas_interpoladas.append(fecha_interpolada)
-                            
-                            # Interpolar valores para cada ticker
-                            for ticker in rentabilidades.keys():
-                                if ticker in rentabilidades:
-                                    # Obtener valores reales en las fechas clave
-                                    valor_actual = rentabilidades[ticker].loc[
-                                        rentabilidades[ticker].index <= fecha_actual
-                                    ].iloc[-1] if len(rentabilidades[ticker].loc[
-                                        rentabilidades[ticker].index <= fecha_actual
-                                    ]) > 0 else 0
-                                    
-                                    valor_siguiente = rentabilidades[ticker].loc[
-                                        rentabilidades[ticker].index <= fecha_siguiente
-                                    ].iloc[-1] if len(rentabilidades[ticker].loc[
-                                        rentabilidades[ticker].index <= fecha_siguiente
-                                    ]) > 0 else valor_actual
-                                    
-                                    # Interpolación suave (easing)
-                                    # Usar easing cuadrático para movimiento más natural
-                                    factor_suave = factor * factor * (3.0 - 2.0 * factor)  # smoothstep
-                                    valor_interpolado = valor_actual + (valor_siguiente - valor_actual) * factor_suave
-                                    
-                                    datos_interpolados[ticker].append(valor_interpolado)
-                    
-                    # Mostrar animación suave
-                    st.info(f"🎬 Reproduciendo animación suave con {len(todas_fechas_interpoladas)} frames...")
-                    progress_animacion = st.progress(0)
-                    
-                    # Crear el gráfico base una sola vez y actualizar solo los datos
-                    fig_base = go.Figure()
-                    
-                    # Configurar layout base
-                    template = "plotly_dark" if tema_oscuro else "plotly_white"
-                    
-                    fig_base.update_layout(
-                        title=dict(
-                            text=f"📊 Evolución DCA Suave - Inversión Mensual: ${st.session_state.inversion_analisis:,}",
-                            x=0.5,
-                            font=dict(size=20, color='white' if tema_oscuro else 'black')
-                        ),
-                        xaxis_title="📅 Fecha",
-                        yaxis_title="💰 Rentabilidad Acumulada (%)",
-                        template=template,
-                        hovermode='x unified',
-                        height=600,
-                        showlegend=True,
-                        xaxis=dict(
-                            showgrid=mostrar_grid,
-                            gridcolor='rgba(128,128,128,0.2)',
-                            range=[fechas_clave[0], fechas_clave[-1]]
-                        ),
-                        yaxis=dict(
-                            showgrid=mostrar_grid,
-                            gridcolor='rgba(128,128,128,0.2)',
-                            tickformat=".1f",
-                            ticksuffix="%"
-                        ),
-                        plot_bgcolor='rgba(0,0,0,0)',
-                        paper_bgcolor='rgba(0,0,0,0)',
-                        margin=dict(l=60, r=60, t=80, b=60),
-                        transition_duration=300,  # Transición suave entre frames
-                        transition_easing="cubic-in-out"
-                    )
-                    
-                    for i, fecha_frame in enumerate(todas_fechas_interpoladas):
-                        # Crear figura para este frame
-                        fig = go.Figure(fig_base)
+                        # Interpolación suave entre puntos
+                        if fecha_idx < len(fechas_clave) - 1 and sub_frame < 2:
+                            factor = sub_frame / 2.0
+                            # Easing suave
+                            factor = factor * factor * (3.0 - 2.0 * factor)
+                        else:
+                            factor = 1.0
                         
-                        # Añadir datos hasta este frame para cada ticker
+                        # Crear figura optimizada
+                        fig = go.Figure()
+                        
+                        # Calcular punto final para este frame
+                        punto_final = min(fecha_idx + 1, len(fechas_clave) - 1)
+                        
                         for ticker in rentabilidades.keys():
-                            if ticker in datos_interpolados:
-                                emoji = ACTIVOS_PREDEFINIDOS.get(ticker, {}).get('emoji', '📈')
-                                color = ACTIVOS_PREDEFINIDOS.get(ticker, {}).get('color', '#1f77b4')
+                            emoji = ACTIVOS_PREDEFINIDOS.get(ticker, {}).get('emoji', '📈')
+                            color = ACTIVOS_PREDEFINIDOS.get(ticker, {}).get('color', '#1f77b4')
+                            
+                            # Datos hasta el punto actual
+                            fechas_hasta_punto = fechas_clave[:punto_final + 1]
+                            valores_hasta_punto = datos_precalculados[ticker][:punto_final + 1]
+                            
+                            # Interpolación del último punto si no estamos en el final
+                            if punto_final < len(fechas_clave) - 1 and factor < 1.0:
+                                valor_actual = datos_precalculados[ticker][fecha_idx]
+                                valor_siguiente = datos_precalculados[ticker][fecha_idx + 1]
+                                valor_interpolado = valor_actual + (valor_siguiente - valor_actual) * factor
                                 
-                                # Datos hasta el frame actual
-                                fechas_hasta_ahora = todas_fechas_interpoladas[:i+1]
-                                valores_hasta_ahora = datos_interpolados[ticker][:i+1]
+                                # Reemplazar último valor con interpolado
+                                if len(valores_hasta_punto) > 0:
+                                    valores_hasta_punto = valores_hasta_punto[:-1] + [valor_interpolado]
+                            
+                            if len(valores_hasta_punto) > 0:
+                                fig.add_trace(go.Scatter(
+                                    x=fechas_hasta_punto,
+                                    y=valores_hasta_punto,
+                                    mode='lines',
+                                    name=f'{emoji} {ticker}',
+                                    line=dict(
+                                        color=color,
+                                        width=3,
+                                        smoothing=1.5  # Máximo suavizado
+                                    ),
+                                    hovertemplate=f'<b>{ticker}</b><br>' +
+                                                'Fecha: %{x|%d/%m/%Y}<br>' +
+                                                'Rentabilidad: %{y:.1f}%<br>' +
+                                                '<extra></extra>',
+                                    connectgaps=True
+                                ))
                                 
-                                if len(valores_hasta_ahora) > 0:
+                                # Punto actual más sutil
+                                if len(valores_hasta_punto) > 1:
                                     fig.add_trace(go.Scatter(
-                                        x=fechas_hasta_ahora,
-                                        y=valores_hasta_ahora,
-                                        mode='lines',
-                                        name=f'{emoji} {ticker}',
-                                        line=dict(
+                                        x=[fechas_hasta_punto[-1]],
+                                        y=[valores_hasta_punto[-1]],
+                                        mode='markers',
+                                        name=f'{ticker}_point',
+                                        marker=dict(
                                             color=color,
-                                            width=3,
-                                            smoothing=1.3
+                                            size=6,
+                                            symbol='circle',
+                                            opacity=0.8
                                         ),
-                                        hovertemplate=f'<b>{ticker}</b><br>' +
-                                                    'Fecha: %{x|%d/%m/%Y}<br>' +
-                                                    'Rentabilidad: %{y:.1f}%<br>' +
-                                                    '<extra></extra>',
-                                        connectgaps=True
+                                        showlegend=False,
+                                        hoverinfo='skip'
                                     ))
-                                    
-                                    # Añadir punto actual destacado
-                                    if i > 0:  # No en el primer frame
-                                        fig.add_trace(go.Scatter(
-                                            x=[fecha_frame],
-                                            y=[valores_hasta_ahora[-1]],
-                                            mode='markers',
-                                            name=f'{ticker}_current',
-                                            marker=dict(
-                                                color=color,
-                                                size=8,
-                                                symbol='circle',
-                                                line=dict(color='white', width=2)
-                                            ),
-                                            showlegend=False,
-                                            hoverinfo='skip'
-                                        ))
                         
-                        # Añadir indicador de fecha actual
-                        fig.add_annotation(
-                            text=f"📅 {fecha_frame.strftime('%d/%m/%Y')}",
-                            xref="paper", yref="paper",
-                            x=0.02, y=0.98,
-                            showarrow=False,
-                            font=dict(size=16, color="yellow"),
-                            bgcolor="rgba(0,0,0,0.7)",
-                            bordercolor="yellow",
-                            borderwidth=1,
-                            borderpad=8
+                        # Layout optimizado con transiciones CSS
+                        template = "plotly_dark" if tema_oscuro else "plotly_white"
+                        fig.update_layout(
+                            title=dict(
+                                text=f"📊 Evolución DCA Ultra-Fluida - ${st.session_state.inversion_analisis:,}/mes",
+                                x=0.5,
+                                font=dict(size=18, color='white' if tema_oscuro else 'black')
+                            ),
+                            xaxis_title="📅 Fecha",
+                            yaxis_title="💰 Rentabilidad Acumulada (%)",
+                            template=template,
+                            hovermode='x unified',
+                            height=500,  # Altura fija menor para menos redraw
+                            showlegend=True,
+                            legend=dict(
+                                orientation="h",
+                                yanchor="bottom",
+                                y=1.02,
+                                xanchor="center",
+                                x=0.5
+                            ),
+                            xaxis=dict(
+                                showgrid=mostrar_grid,
+                                gridcolor='rgba(128,128,128,0.1)',
+                                range=[fechas_clave[0], fechas_clave[-1]],
+                                fixedrange=True  # Evitar zoom automático
+                            ),
+                            yaxis=dict(
+                                showgrid=mostrar_grid,
+                                gridcolor='rgba(128,128,128,0.1)',
+                                tickformat=".1f",
+                                ticksuffix="%",
+                                fixedrange=True  # Evitar zoom automático
+                            ),
+                            plot_bgcolor='rgba(0,0,0,0)',
+                            paper_bgcolor='rgba(0,0,0,0)',
+                            margin=dict(l=50, r=50, t=60, b=40),
+                            # Configuraciones para animación fluida
+                            uirevision='constant',  # Mantener estado UI
+                            transition=dict(
+                                duration=50,  # Transición muy rápida
+                                easing="linear"
+                            )
                         )
                         
-                        # Mostrar gráfico
-                        chart_container.plotly_chart(fig, use_container_width=True, key=f"smooth_anim_{i}")
+                        # Indicador de fecha más discreto
+                        fecha_actual = fechas_clave[min(fecha_idx, len(fechas_clave) - 1)]
+                        fig.add_annotation(
+                            text=f"📅 {fecha_actual.strftime('%b %Y')}",
+                            xref="paper", yref="paper",
+                            x=0.02, y=0.02,  # Posición inferior
+                            showarrow=False,
+                            font=dict(size=12, color="rgba(255,255,255,0.7)"),
+                            bgcolor="rgba(0,0,0,0.3)",
+                            borderwidth=0,
+                            borderpad=5
+                        )
                         
-                        # Mostrar progreso y métricas actuales de forma más sutil
-                        if i % 10 == 0:  # Solo cada 10 frames para no saturar
-                            cols_info = st.columns(len(rentabilidades))
-                            for j, ticker in enumerate(rentabilidades.keys()):
-                                with cols_info[j]:
-                                    if ticker in datos_interpolados and i < len(datos_interpolados[ticker]):
-                                        emoji = ACTIVOS_PREDEFINIDOS.get(ticker, {}).get('emoji', '📈')
-                                        valor_actual = datos_interpolados[ticker][i]
-                                        st.metric(
-                                            label=f"{emoji} {ticker}",
-                                            value=f"{valor_actual:.1f}%"
-                                        )
+                        # Mostrar con clave única para evitar conflictos
+                        chart_container_fixed.plotly_chart(
+                            fig, 
+                            use_container_width=True, 
+                            key=f"ultra_smooth_{i}",
+                            config={'displayModeBar': False}  # Ocultar toolbar para más fluidez
+                        )
                         
-                        # Control de velocidad de animación suave
-                        delay = velocidad_map[velocidad_animacion] / 2  # Más rápido para compensar más frames
-                        progress_animacion.progress((i + 1) / len(todas_fechas_interpoladas))
-                        time.sleep(delay)
+                        # Actualizar progreso sin parpadeo
+                        progress_bar.progress((i + 1) / total_frames)
+                        
+                        # Delay mínimo para máxima fluidez
+                        time.sleep(velocidad_map[velocidad_animacion] * 0.3)  # 30% de la velocidad original
                     
-                    progress_animacion.empty()
-                    st.success("🎉 ¡Animación suave completada!")
+                    progress_container.empty()
+                    
+                    # Mostrar resultado final optimizado
+                    fig_final = go.Figure()
+                    for ticker in rentabilidades.keys():
+                        emoji = ACTIVOS_PREDEFINIDOS.get(ticker, {}).get('emoji', '📈')
+                        color = ACTIVOS_PREDEFINIDOS.get(ticker, {}).get('color', '#1f77b4')
+                        
+                        valores_completos = datos_precalculados[ticker]
+                        
+                        fig_final.add_trace(go.Scatter(
+                            x=fechas_clave,
+                            y=valores_completos,
+                            mode='lines',
+                            name=f'{emoji} {ticker}',
+                            line=dict(color=color, width=3, smoothing=1.5)
+                        ))
+                    
+                    fig_final.update_layout(
+                        title="🎉 Evolución Completa - Animación Finalizada",
+                        template=template,
+                        height=500,
+                        showlegend=True
+                    )
+                    
+                    chart_container_fixed.plotly_chart(fig_final, use_container_width=True)
+                    st.success("🎉 ¡Animación ultra-fluida completada!")
                 
             elif 'mostrar_final' in st.session_state and st.session_state.mostrar_final:
                 st.session_state.mostrar_final = False  # Reset
-                fig = crear_grafico_animado(mostrar_valores_abs=mostrar_valores)
+                fig = crear_grafico_animado()
                 chart_container.plotly_chart(fig, use_container_width=True)
             
             # Métricas finales elegantes
