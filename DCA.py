@@ -483,7 +483,7 @@ if 'analisis_iniciado' in st.session_state and st.session_state.analisis_iniciad
                 if min_length == 0:
                     st.error("No hay datos suficientes para la animación")
                 else:
-                    st.info("🎬 Iniciando animación ultra-suave sin flickering...")
+                    st.info("🎬 Iniciando animación")
                     
                     # MÉTODO ALTERNATIVO 1: Animación con actualización de contenedor
                     with chart_placeholder.container():
@@ -578,7 +578,7 @@ if 'analisis_iniciado' in st.session_state and st.session_state.analisis_iniciad
                             title=dict(text="🎉 Evolución Completa - Animación Ultra-Suave Finalizada"),
                             annotations=[
                                 dict(
-                                    text="✨ Animación completada sin flickering",
+                                    text="✨ Animación completada.",
                                     xref="paper", yref="paper",
                                     x=0.5, y=0.95,
                                     showarrow=False,
@@ -599,7 +599,7 @@ if 'analisis_iniciado' in st.session_state and st.session_state.analisis_iniciad
                                 key="final_smooth_chart"
                             )
                         
-                        st.success("🎉 ¡Animación ultra-suave completada sin flickering ni errores de key!")
+                        st.success("🎉 ¡Animación completada!")
             
             elif 'mostrar_final' in st.session_state and st.session_state.mostrar_final:
                 st.session_state.mostrar_final = False  # Reset
@@ -748,7 +748,7 @@ else:
         <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 1rem; border-radius: 10px; margin: 2rem auto; max-width: 500px;">
             <h3 style="color: white; margin: 0;">✨ Nuevo: Animación Ultra-Suave</h3>
             <p style="color: rgba(255,255,255,0.9); margin: 0.5rem 0 0 0;">
-                Sin flickering ni parpadeos. Experiencia de visualización completamente fluida.
+                Experiencia de visualización completamente fluida.
             </p>
         </div>
     </div>
@@ -775,6 +775,6 @@ st.markdown("---")
 st.markdown("""
 <div style="text-align: center; padding: 2rem; opacity: 0.7;">
     <p>📊 <strong>DCA Evolution Visualizer v2.0</strong> | Ultra-Smooth Animation</p>
-    <p>💡 Visualiza el poder del Dollar Cost Averaging sin flickering</p>
+    <p>💡 Visualiza el poder del Dollar Cost Averaging.</p>
 </div>
 """, unsafe_allow_html=True)
