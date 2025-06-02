@@ -10,7 +10,7 @@ import json
 
 # Configuración de la página
 st.set_page_config(
-    page_title="DCA Evolution Visualizer",
+    page_title="BQuant-DCA Evolution Visualizer",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -58,7 +58,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Título principal con estilo
-st.markdown('<h1 class="main-header">📈 DCA Evolution Visualizer</h1>', unsafe_allow_html=True)
+st.markdown('<h1 class="main-header">📈 BQuant-DCA Evolution Visualizer</h1>', unsafe_allow_html=True)
 st.markdown('<p class="sub-header">Visualiza la evolución día a día de tu estrategia Dollar Cost Averaging</p>', unsafe_allow_html=True)
 
 # Diccionario de activos con colores vibrantes
@@ -90,7 +90,7 @@ def descargar_datos_yfinance(tickers, fecha_inicio, fecha_fin):
             if len(tickers) == 1:
                 datos.columns = pd.MultiIndex.from_product([datos.columns, [tickers[0]]])
             
-            precios = datos['Close'].fillna(method='ffill').fillna(method='bfill')
+            precios = datos['Close'].ffill().bfill()  # Fixed: replaced fillna(method) with ffill() and bfill()
             return precios
     except Exception as e:
         st.error(f"❌ Error descargando datos: {str(e)}")
@@ -166,9 +166,9 @@ def calcular_dca_detallado(precios, inversion_mensual=100):
         inversion_acumulada_diaria.loc[fecha] = inversion_total
     
     # Reindexar a toda la serie original (rellenar valores faltantes)
-    rentabilidad_completa = rentabilidad_diaria.reindex(precios.index).fillna(method='ffill').fillna(0)
-    valor_completo = valor_portfolio_diario.reindex(precios.index).fillna(method='ffill').fillna(0)
-    inversion_completa = inversion_acumulada_diaria.reindex(precios.index).fillna(method='ffill').fillna(0)
+    rentabilidad_completa = rentabilidad_diaria.reindex(precios.index).ffill().fillna(0)  # Fixed: replaced fillna(method) with ffill()
+    valor_completo = valor_portfolio_diario.reindex(precios.index).ffill().fillna(0)  # Fixed: replaced fillna(method) with ffill()
+    inversion_completa = inversion_acumulada_diaria.reindex(precios.index).ffill().fillna(0)  # Fixed: replaced fillna(method) with ffill()
     
     return rentabilidad_completa, valor_completo, inversion_completa
 
@@ -354,7 +354,7 @@ if 'analisis_iniciado' in st.session_state and st.session_state.analisis_iniciad
                         if len(y_data_clean) == 0:
                             continue
                         
-                        # Línea principal con interpolación suave
+                        # Línea principal con interpolación suave (Fixed: smoothing value reduced from 1.3 to 1.2)
                         fig.add_trace(go.Scatter(
                             x=y_data_clean.index,
                             y=y_data_clean.values,
@@ -363,7 +363,7 @@ if 'analisis_iniciado' in st.session_state and st.session_state.analisis_iniciad
                             line=dict(
                                 color=color,
                                 width=3,
-                                smoothing=1.3  # Suavizado de líneas
+                                smoothing=1.2  # Fixed: reduced from 1.3 to 1.2 to be safe
                             ),
                             hovertemplate=f'<b>{ticker}</b><br>' +
                                         'Fecha: %{x|%d/%m/%Y}<br>' +
@@ -556,7 +556,7 @@ if 'analisis_iniciado' in st.session_state and st.session_state.analisis_iniciad
                                     line=dict(
                                         color=color,
                                         width=3,
-                                        smoothing=1.5  # Máximo suavizado
+                                        smoothing=1.2  # Fixed: reduced from 1.5 to 1.2
                                     ),
                                     hovertemplate=f'<b>{ticker}</b><br>' +
                                                 'Fecha: %{x|%d/%m/%Y}<br>' +
@@ -669,7 +669,7 @@ if 'analisis_iniciado' in st.session_state and st.session_state.analisis_iniciad
                             y=valores_completos,
                             mode='lines',
                             name=f'{emoji} {ticker}',
-                            line=dict(color=color, width=3, smoothing=1.5)
+                            line=dict(color=color, width=3, smoothing=1.2)  # Fixed: reduced from 1.5 to 1.2
                         ))
                     
                     fig_final.update_layout(
