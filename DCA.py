@@ -96,53 +96,81 @@ def descargar_datos_yfinance(tickers, fecha_inicio, fecha_fin):
         st.error(f"❌ Error descargando datos: {str(e)}")
         return None
 
-# Función para calcular DCA con más detalle
+# Función para calcular DCA correctamente
 def calcular_dca_detallado(precios, inversion_mensual=100):
-    """Calcula rentabilidad DCA día a día con detalles"""
+    """Calcula rentabilidad DCA día a día correctamente"""
     if precios is None or len(precios) == 0:
         return pd.Series(dtype=float), pd.Series(dtype=float), pd.Series(dtype=float)
     
-    # Crear fechas de inversión (primer día de cada mes)
-    fechas_inversion = pd.date_range(
-        start=precios.index[0].replace(day=1),
-        end=precios.index[-1],
-        freq='MS'
-    )
+    # Limpiar datos de precios
+    precios_clean = precios.dropna()
+    if len(precios_clean) == 0:
+        return pd.Series(dtype=float), pd.Series(dtype=float), pd.Series(dtype=float)
     
-    # Filtrar fechas que están en nuestros datos
-    fechas_inversion = [f for f in fechas_inversion if f in precios.index]
+    # Crear fechas de inversión mensual (primer día hábil de cada mes)
+    fechas_inversion = []
+    fecha_actual = precios_clean.index[0]
+    
+    while fecha_actual <= precios_clean.index[-1]:
+        # Buscar el primer día del mes que tenga datos
+        primer_dia_mes = fecha_actual.replace(day=1)
+        
+        # Encontrar el primer día con datos en este mes
+        dias_mes = precios_clean.index[
+            (precios_clean.index >= primer_dia_mes) & 
+            (precios_clean.index < primer_dia_mes + pd.DateOffset(months=1))
+        ]
+        
+        if len(dias_mes) > 0:
+            fechas_inversion.append(dias_mes[0])
+        
+        # Siguiente mes
+        fecha_actual = primer_dia_mes + pd.DateOffset(months=1)
     
     if len(fechas_inversion) == 0:
         return pd.Series(dtype=float), pd.Series(dtype=float), pd.Series(dtype=float)
     
-    # Calcular inversión acumulada y acciones compradas
-    acciones_totales = pd.Series(0.0, index=precios.index)
-    inversion_acumulada = pd.Series(0.0, index=precios.index)
+    # Inicializar series para resultados
+    acciones_totales = 0.0
+    inversion_total = 0.0
     
-    acciones_compradas_mes = 0
-    inversion_total = 0
+    # Series para almacenar resultados día a día
+    rentabilidad_diaria = pd.Series(index=precios_clean.index, dtype=float)
+    valor_portfolio_diario = pd.Series(index=precios_clean.index, dtype=float)
+    inversion_acumulada_diaria = pd.Series(index=precios_clean.index, dtype=float)
     
-    for fecha in precios.index:
+    # Calcular DCA día a día
+    for fecha in precios_clean.index:
+        # Verificar si es día de inversión
         if fecha in fechas_inversion:
-            # Día de inversión
-            precio_compra = precios.loc[fecha]
-            if not pd.isna(precio_compra) and precio_compra > 0:
-                acciones_compradas_mes = inversion_mensual / precio_compra
+            precio_compra = precios_clean.loc[fecha]
+            if precio_compra > 0:
+                # Comprar acciones con la inversión mensual
+                nuevas_acciones = inversion_mensual / precio_compra
+                acciones_totales += nuevas_acciones
                 inversion_total += inversion_mensual
         
-        acciones_totales.loc[fecha] = acciones_totales.loc[:fecha].iloc[:-1].sum() + acciones_compradas_mes
-        inversion_acumulada.loc[fecha] = inversion_total
+        # Calcular valor del portfolio hoy
+        precio_actual = precios_clean.loc[fecha]
+        valor_portfolio_hoy = acciones_totales * precio_actual
         
-        acciones_compradas_mes = 0  # Reset para próxima fecha
+        # Calcular rentabilidad acumulada
+        if inversion_total > 0:
+            rentabilidad_hoy = ((valor_portfolio_hoy / inversion_total) - 1) * 100
+        else:
+            rentabilidad_hoy = 0.0
+        
+        # Guardar valores
+        rentabilidad_diaria.loc[fecha] = rentabilidad_hoy
+        valor_portfolio_diario.loc[fecha] = valor_portfolio_hoy
+        inversion_acumulada_diaria.loc[fecha] = inversion_total
     
-    # Calcular valor del portfolio día a día
-    valor_portfolio = acciones_totales * precios
+    # Reindexar a toda la serie original (rellenar valores faltantes)
+    rentabilidad_completa = rentabilidad_diaria.reindex(precios.index).fillna(method='ffill').fillna(0)
+    valor_completo = valor_portfolio_diario.reindex(precios.index).fillna(method='ffill').fillna(0)
+    inversion_completa = inversion_acumulada_diaria.reindex(precios.index).fillna(method='ffill').fillna(0)
     
-    # Calcular rentabilidad porcentual
-    rentabilidad = ((valor_portfolio / inversion_acumulada) - 1) * 100
-    rentabilidad = rentabilidad.fillna(0)
-    
-    return rentabilidad, valor_portfolio, inversion_acumulada
+    return rentabilidad_completa, valor_completo, inversion_completa
 
 # Sidebar - Configuración elegante
 st.sidebar.markdown("## ⚙️ Configuración de Análisis")
@@ -306,82 +334,115 @@ if 'analisis_iniciado' in st.session_state and st.session_state.analisis_iniciad
                 
                 # Determinar datos a mostrar
                 if hasta_fecha:
-                    fechas_mostrar = [f for f in todas_fechas if f <= hasta_fecha]
+                    # Filtrar datos hasta la fecha especificada
+                    datos_filtrados = {}
+                    for ticker in rentabilidades.keys():
+                        datos_completos = rentabilidades[ticker].loc[rentabilidades[ticker].index <= hasta_fecha]
+                        if len(datos_completos) > 0:
+                            datos_filtrados[ticker] = datos_completos
                 else:
-                    fechas_mostrar = todas_fechas
+                    datos_filtrados = rentabilidades
                 
                 # Añadir líneas para cada activo
-                for ticker in rentabilidades.keys():
-                    datos_ticker = rentabilidades[ticker].loc[fechas_mostrar].dropna()
-                    
-                    if len(datos_ticker) > 0:
+                for ticker, datos_ticker in datos_filtrados.items():
+                    if len(datos_ticker.dropna()) > 0:
                         # Configurar color y estilo
                         color = ACTIVOS_PREDEFINIDOS.get(ticker, {}).get('color', '#1f77b4')
                         emoji = ACTIVOS_PREDEFINIDOS.get(ticker, {}).get('emoji', '📈')
                         
                         # Datos a mostrar (rentabilidad o valores absolutos)
                         if mostrar_valores_abs and ticker in valores_portfolio:
-                            y_data = valores_portfolio[ticker].loc[fechas_mostrar].dropna()
+                            if hasta_fecha:
+                                y_data = valores_portfolio[ticker].loc[valores_portfolio[ticker].index <= hasta_fecha]
+                            else:
+                                y_data = valores_portfolio[ticker]
                             y_title = "Valor Portfolio ($)"
                             hover_format = "$%{y:,.0f}"
+                            yaxis_format = ".0f"
                         else:
                             y_data = datos_ticker
-                            y_title = "Rentabilidad (%)"
+                            y_title = "Rentabilidad Acumulada (%)"
                             hover_format = "%{y:.1f}%"
+                            yaxis_format = ".1f"
                         
-                        # Línea principal
+                        # Limpiar datos para evitar valores extraños
+                        y_data_clean = y_data.dropna()
+                        if len(y_data_clean) == 0:
+                            continue
+                        
+                        # Línea principal con interpolación suave
                         fig.add_trace(go.Scatter(
-                            x=y_data.index,
-                            y=y_data,
+                            x=y_data_clean.index,
+                            y=y_data_clean.values,
                             mode='lines',
                             name=f'{emoji} {ticker}',
                             line=dict(
                                 color=color,
                                 width=3,
-                                shape='spline'  # Líneas más suaves
+                                smoothing=1.3  # Suavizado de líneas
                             ),
                             hovertemplate=f'<b>{ticker}</b><br>' +
-                                        'Fecha: %{x}<br>' +
+                                        'Fecha: %{x|%d/%m/%Y}<br>' +
                                         f'Valor: {hover_format}<br>' +
                                         '<extra></extra>',
-                            fill=None
+                            connectgaps=True
                         ))
                         
                         # Añadir marcadores en días de inversión si está habilitado
                         if mostrar_marcadores_inversion and hasta_fecha:
-                            # Encontrar días de inversión (primeros del mes)
-                            dias_inversion = [f for f in fechas_mostrar 
-                                            if f.day == 1 and f in y_data.index]
-                            
-                            if dias_inversion:
-                                valores_inversion = y_data.loc[dias_inversion]
+                            # Encontrar días de inversión (buscar saltos en inversión acumulada)
+                            if ticker in inversiones_acumuladas:
+                                inversiones_ticker = inversiones_acumuladas[ticker].loc[inversiones_acumuladas[ticker].index <= hasta_fecha]
+                                # Detectar días donde aumentó la inversión
+                                diff_inversiones = inversiones_ticker.diff()
+                                dias_inversion_idx = diff_inversiones[diff_inversiones > 0].index
                                 
-                                fig.add_trace(go.Scatter(
-                                    x=valores_inversion.index,
-                                    y=valores_inversion,
-                                    mode='markers',
-                                    name=f'{ticker} (Inversiones)',
-                                    marker=dict(
-                                        color=color,
-                                        size=8,
-                                        symbol='circle',
-                                        line=dict(color='white', width=2)
-                                    ),
-                                    showlegend=False,
-                                    hovertemplate=f'<b>{ticker} - Día de Inversión</b><br>' +
-                                                'Fecha: %{x}<br>' +
-                                                f'Valor: {hover_format}<br>' +
-                                                '<extra></extra>'
-                                ))
+                                if len(dias_inversion_idx) > 0:
+                                    valores_inversion = y_data_clean.reindex(dias_inversion_idx).dropna()
+                                    
+                                    if len(valores_inversion) > 0:
+                                        fig.add_trace(go.Scatter(
+                                            x=valores_inversion.index,
+                                            y=valores_inversion.values,
+                                            mode='markers',
+                                            name=f'{ticker} (Compras)',
+                                            marker=dict(
+                                                color=color,
+                                                size=10,
+                                                symbol='circle',
+                                                line=dict(color='white', width=2)
+                                            ),
+                                            showlegend=False,
+                                            hovertemplate=f'<b>{ticker} - Compra Mensual</b><br>' +
+                                                        'Fecha: %{x|%d/%m/%Y}<br>' +
+                                                        f'Valor: {hover_format}<br>' +
+                                                        f'💰 ${st.session_state.inversion_analisis:,} invertidos<br>' +
+                                                        '<extra></extra>'
+                                        ))
                 
-                # Configurar layout
+                # Configurar layout mejorado
                 template = "plotly_dark" if tema_oscuro else "plotly_white"
+                
+                # Configurar formato del eje Y basado en los datos
+                if mostrar_valores_abs:
+                    yaxis_config = dict(
+                        tickformat="$,.0f",
+                        showgrid=mostrar_grid,
+                        gridcolor='rgba(128,128,128,0.2)'
+                    )
+                else:
+                    yaxis_config = dict(
+                        tickformat=".1f",
+                        ticksuffix="%",
+                        showgrid=mostrar_grid,
+                        gridcolor='rgba(128,128,128,0.2)'
+                    )
                 
                 fig.update_layout(
                     title=dict(
-                        text=f"📈 Evolución DCA - Inversión Mensual: ${st.session_state.inversion_analisis:,}",
+                        text=f"📊 Evolución DCA - Inversión Mensual: ${st.session_state.inversion_analisis:,}",
                         x=0.5,
-                        font=dict(size=24, color='white' if tema_oscuro else 'black')
+                        font=dict(size=20, color='white' if tema_oscuro else 'black')
                     ),
                     xaxis_title="📅 Fecha",
                     yaxis_title=f"💰 {y_title}",
@@ -395,12 +456,17 @@ if 'analisis_iniciado' in st.session_state and st.session_state.analisis_iniciad
                         x=0.5,
                         bgcolor="rgba(0,0,0,0.8)" if tema_oscuro else "rgba(255,255,255,0.8)"
                     ),
-                    height=650,
+                    height=600,
                     showlegend=True,
-                    xaxis=dict(showgrid=mostrar_grid),
-                    yaxis=dict(showgrid=mostrar_grid),
+                    xaxis=dict(
+                        showgrid=mostrar_grid,
+                        gridcolor='rgba(128,128,128,0.2)',
+                        tickformat='%b %Y'
+                    ),
+                    yaxis=yaxis_config,
                     plot_bgcolor='rgba(0,0,0,0)',
-                    paper_bgcolor='rgba(0,0,0,0)'
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    margin=dict(l=60, r=60, t=80, b=60)
                 )
                 
                 # Añadir anotación con fecha actual si es animación
@@ -410,11 +476,11 @@ if 'analisis_iniciado' in st.session_state and st.session_state.analisis_iniciad
                         xref="paper", yref="paper",
                         x=0.02, y=0.98,
                         showarrow=False,
-                        font=dict(size=18, color="yellow"),
+                        font=dict(size=16, color="yellow"),
                         bgcolor="rgba(0,0,0,0.7)",
                         bordercolor="yellow",
-                        borderwidth=2,
-                        borderpad=10
+                        borderwidth=1,
+                        borderpad=8
                     )
                 
                 return fig
@@ -423,36 +489,98 @@ if 'analisis_iniciado' in st.session_state and st.session_state.analisis_iniciad
             if 'reproducir_animacion' in st.session_state and st.session_state.reproducir_animacion:
                 st.session_state.reproducir_animacion = False  # Reset
                 
-                # Preparar fechas para animación (saltar fechas para mejor performance)
-                fechas_animacion = todas_fechas[::max(1, len(todas_fechas) // 200)]  # Máximo 200 frames
+                # Obtener fechas comunes a todos los activos
+                fechas_comunes = None
+                for ticker in rentabilidades.keys():
+                    fechas_ticker = rentabilidades[ticker].dropna().index
+                    if fechas_comunes is None:
+                        fechas_comunes = fechas_ticker
+                    else:
+                        fechas_comunes = fechas_comunes.intersection(fechas_ticker)
                 
+                if len(fechas_comunes) == 0:
+                    st.error("No hay fechas comunes entre los activos seleccionados")
+                    return
+                
+                fechas_comunes = sorted(fechas_comunes)
+                
+                # Crear un sampling inteligente para la animación
+                total_fechas = len(fechas_comunes)
+                if total_fechas > 150:
+                    # Si hay muchas fechas, hacer sampling
+                    step = max(1, total_fechas // 150)
+                    fechas_animacion = fechas_comunes[::step]
+                    # Asegurar que incluimos la última fecha
+                    if fechas_comunes[-1] not in fechas_animacion:
+                        fechas_animacion.append(fechas_comunes[-1])
+                else:
+                    fechas_animacion = fechas_comunes
+                
+                st.info(f"🎬 Iniciando animación con {len(fechas_animacion)} frames...")
                 progress_animacion = st.progress(0)
                 
                 for i, fecha_actual in enumerate(fechas_animacion):
+                    # Crear y mostrar gráfico
                     fig = crear_grafico_animado(fecha_actual, mostrar_valores)
                     chart_container.plotly_chart(fig, use_container_width=True, key=f"anim_{i}")
                     
-                    # Información en tiempo real
+                    # Información en tiempo real mejorada
                     rentabilidades_actuales = {}
+                    valores_actuales = {}
+                    inversiones_actuales = {}
+                    
                     for ticker in rentabilidades.keys():
-                        if fecha_actual in rentabilidades[ticker].index:
-                            rentabilidades_actuales[ticker] = rentabilidades[ticker].loc[fecha_actual]
+                        # Buscar el valor más cercano a la fecha actual
+                        ticker_data = rentabilidades[ticker].loc[rentabilidades[ticker].index <= fecha_actual]
+                        if len(ticker_data) > 0:
+                            rentabilidades_actuales[ticker] = ticker_data.iloc[-1]
+                        
+                        if ticker in valores_portfolio:
+                            valor_data = valores_portfolio[ticker].loc[valores_portfolio[ticker].index <= fecha_actual]
+                            if len(valor_data) > 0:
+                                valores_actuales[ticker] = valor_data.iloc[-1]
+                        
+                        if ticker in inversiones_acumuladas:
+                            inv_data = inversiones_acumuladas[ticker].loc[inversiones_acumuladas[ticker].index <= fecha_actual]
+                            if len(inv_data) > 0:
+                                inversiones_actuales[ticker] = inv_data.iloc[-1]
                     
+                    # Mostrar métricas actuales en formato mejorado
                     if rentabilidades_actuales:
-                        # Mostrar métricas actuales
-                        cols_info = st.columns(len(rentabilidades_actuales))
-                        info_text = ""
+                        cols_info = st.columns(min(len(rentabilidades_actuales), 4))
                         
-                        for j, (ticker, valor) in enumerate(rentabilidades_actuales.items()):
-                            emoji = ACTIVOS_PREDEFINIDOS.get(ticker, {}).get('emoji', '📈')
-                            if mostrar_valores and ticker in valores_portfolio:
-                                valor_mostrar = valores_portfolio[ticker].loc[fecha_actual]
-                                info_text += f"{emoji} **{ticker}**: ${valor_mostrar:,.0f} | "
-                            else:
-                                info_text += f"{emoji} **{ticker}**: {valor:.1f}% | "
-                        
-                        info_container.markdown(f"**Valores actuales:** {info_text[:-3]}")
+                        for j, ticker in enumerate(rentabilidades_actuales.keys()):
+                            with cols_info[j % 4]:
+                                emoji = ACTIVOS_PREDEFINIDOS.get(ticker, {}).get('emoji', '📈')
+                                color = ACTIVOS_PREDEFINIDOS.get(ticker, {}).get('color', '#1f77b4')
+                                
+                                rent_val = rentabilidades_actuales[ticker]
+                                valor_val = valores_actuales.get(ticker, 0)
+                                inv_val = inversiones_actuales.get(ticker, 0)
+                                
+                                # Determinar color de la métrica
+                                color_delta = "normal"
+                                if rent_val > 0:
+                                    color_delta = "normal"
+                                elif rent_val < 0:
+                                    color_delta = "inverse"
+                                
+                                if mostrar_valores:
+                                    st.metric(
+                                        label=f"{emoji} {ticker}",
+                                        value=f"${valor_val:,.0f}",
+                                        delta=f"{rent_val:+.1f}%",
+                                        delta_color=color_delta
+                                    )
+                                else:
+                                    st.metric(
+                                        label=f"{emoji} {ticker}",
+                                        value=f"{rent_val:.1f}%",
+                                        delta=f"${valor_val:,.0f}" if valor_val > 0 else None,
+                                        delta_color=color_delta
+                                    )
                     
+                    # Actualizar progreso
                     progress_animacion.progress((i + 1) / len(fechas_animacion))
                     time.sleep(velocidad_map[velocidad_animacion])
                 
@@ -467,36 +595,141 @@ if 'analisis_iniciado' in st.session_state and st.session_state.analisis_iniciad
             # Métricas finales elegantes
             st.markdown("## 🏆 Resultados Finales")
             
-            cols_metricas = st.columns(len(rentabilidades))
+            # Preparar datos para métricas
+            metricas_finales = []
             
-            for i, (ticker, rentabilidad) in enumerate(rentabilidades.items()):
-                with cols_metricas[i]:
-                    valor_final = rentabilidad.dropna().iloc[-1] if len(rentabilidad.dropna()) > 0 else 0
-                    valor_portfolio_final = valores_portfolio[ticker].dropna().iloc[-1] if ticker in valores_portfolio and len(valores_portfolio[ticker].dropna()) > 0 else 0
-                    inversion_total_final = inversiones_acumuladas[ticker].dropna().iloc[-1] if ticker in inversiones_acumuladas and len(inversiones_acumuladas[ticker].dropna()) > 0 else 0
+            for ticker in rentabilidades.keys():
+                rentabilidad_final = rentabilidades[ticker].dropna()
+                valor_portfolio_final = valores_portfolio[ticker].dropna() if ticker in valores_portfolio else pd.Series()
+                inversion_total_final = inversiones_acumuladas[ticker].dropna() if ticker in inversiones_acumuladas else pd.Series()
+                
+                if len(rentabilidad_final) > 0:
+                    rent_final_val = rentabilidad_final.iloc[-1]
+                    valor_final_val = valor_portfolio_final.iloc[-1] if len(valor_portfolio_final) > 0 else 0
+                    inv_final_val = inversion_total_final.iloc[-1] if len(inversion_total_final) > 0 else 0
                     
-                    emoji = ACTIVOS_PREDEFINIDOS.get(ticker, {}).get('emoji', '📈')
-                    color = ACTIVOS_PREDEFINIDOS.get(ticker, {}).get('color', '#1f77b4')
+                    # Calcular ganancia/pérdida neta
+                    ganancia_neta = valor_final_val - inv_final_val
                     
-                    # Card personalizada con métricas
-                    st.markdown(f"""
-                    <div style="
-                        background: linear-gradient(135deg, {color}20, {color}10);
-                        border-left: 4px solid {color};
-                        padding: 1rem;
-                        border-radius: 10px;
-                        margin: 0.5rem 0;
-                    ">
-                        <h3 style="margin: 0; color: {color};">{emoji} {ticker}</h3>
-                        <p style="font-size: 1.5rem; font-weight: bold; margin: 0.5rem 0;">
-                            {valor_final:+.1f}%
-                        </p>
-                        <p style="margin: 0; opacity: 0.8;">
-                            💰 ${valor_portfolio_final:,.0f}<br>
-                            📊 Invertido: ${inversion_total_final:,.0f}
-                        </p>
-                    </div>
-                    """, unsafe_allow_html=True)
+                    metricas_finales.append({
+                        'ticker': ticker,
+                        'rentabilidad': rent_final_val,
+                        'valor_final': valor_final_val,
+                        'inversion_total': inv_final_val,
+                        'ganancia_neta': ganancia_neta
+                    })
+            
+            # Ordenar por rentabilidad (mejor primero)
+            metricas_finales.sort(key=lambda x: x['rentabilidad'], reverse=True)
+            
+            # Mostrar métricas en columnas
+            if len(metricas_finales) <= 3:
+                cols_metricas = st.columns(len(metricas_finales))
+            else:
+                # Si hay más de 3, hacer filas de 3
+                for i in range(0, len(metricas_finales), 3):
+                    cols_metricas = st.columns(min(3, len(metricas_finales) - i))
+                    grupo_metricas = metricas_finales[i:i+3]
+                    
+                    for j, metrica in enumerate(grupo_metricas):
+                        ticker = metrica['ticker']
+                        with cols_metricas[j]:
+                            emoji = ACTIVOS_PREDEFINIDOS.get(ticker, {}).get('emoji', '📈')
+                            color = ACTIVOS_PREDEFINIDOS.get(ticker, {}).get('color', '#1f77b4')
+                            
+                            # Determinar color del fondo basado en performance
+                            if metrica['rentabilidad'] >= 20:
+                                bg_intensity = "40"  # Verde fuerte
+                                text_color = "#00C851"
+                            elif metrica['rentabilidad'] >= 10:
+                                bg_intensity = "30"  # Verde medio
+                                text_color = "#00C851"
+                            elif metrica['rentabilidad'] >= 0:
+                                bg_intensity = "20"  # Verde suave
+                                text_color = "#00C851"
+                            elif metrica['rentabilidad'] >= -10:
+                                bg_intensity = "20"  # Naranja suave
+                                text_color = "#FF8800"
+                            else:
+                                bg_intensity = "30"  # Rojo
+                                text_color = "#FF4444"
+                            
+                            # Card personalizada con métricas mejoradas
+                            st.markdown(f"""
+                            <div style="
+                                background: linear-gradient(135deg, {color}{bg_intensity}, {color}10);
+                                border-left: 4px solid {color};
+                                padding: 1.2rem;
+                                border-radius: 12px;
+                                margin: 0.5rem 0;
+                                box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+                            ">
+                                <div style="display: flex; align-items: center; margin-bottom: 0.5rem;">
+                                    <span style="font-size: 1.5rem; margin-right: 0.5rem;">{emoji}</span>
+                                    <h3 style="margin: 0; color: {color}; font-weight: bold;">{ticker}</h3>
+                                </div>
+                                
+                                <div style="margin: 0.8rem 0;">
+                                    <p style="font-size: 2rem; font-weight: bold; margin: 0; color: {text_color};">
+                                        {metrica['rentabilidad']:+.1f}%
+                                    </p>
+                                </div>
+                                
+                                <div style="font-size: 0.9rem; opacity: 0.9; line-height: 1.4;">
+                                    <p style="margin: 0.2rem 0;">
+                                        💰 <strong>Valor Final:</strong> ${metrica['valor_final']:,.0f}
+                                    </p>
+                                    <p style="margin: 0.2rem 0;">
+                                        📊 <strong>Total Invertido:</strong> ${metrica['inversion_total']:,.0f}
+                                    </p>
+                                    <p style="margin: 0.2rem 0;">
+                                        {'🎉' if metrica['ganancia_neta'] >= 0 else '😔'} <strong>Ganancia:</strong> <span style="color: {text_color};">${metrica['ganancia_neta']:+,.0f}</span>
+                                    </p>
+                                </div>
+                            </div>
+                            """, unsafe_allow_html=True)
+                    
+                    if i + 3 < len(metricas_finales):
+                        st.markdown("")  # Espacio entre filas
+            
+            # Resumen general
+            if len(metricas_finales) > 1:
+                st.markdown("### 📈 Resumen del Portfolio")
+                
+                # Calcular métricas del portfolio conjunto
+                valor_total_final = sum([m['valor_final'] for m in metricas_finales])
+                inversion_total_final = sum([m['inversion_total'] for m in metricas_finales])
+                ganancia_total = valor_total_final - inversion_total_final
+                rentabilidad_portfolio = ((valor_total_final / inversion_total_final) - 1) * 100 if inversion_total_final > 0 else 0
+                
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    st.metric(
+                        "🎯 Rentabilidad Total",
+                        f"{rentabilidad_portfolio:.1f}%",
+                        f"${ganancia_total:+,.0f}"
+                    )
+                
+                with col2:
+                    st.metric(
+                        "💰 Valor Final",
+                        f"${valor_total_final:,.0f}"
+                    )
+                
+                with col3:
+                    st.metric(
+                        "📊 Total Invertido",
+                        f"${inversion_total_final:,.0f}"
+                    )
+                
+                with col4:
+                    mejor_activo = max(metricas_finales, key=lambda x: x['rentabilidad'])
+                    st.metric(
+                        "🏆 Mejor Activo",
+                        mejor_activo['ticker'],
+                        f"{mejor_activo['rentabilidad']:+.1f}%"
+                    )
             
         else:
             st.error("❌ No se pudieron calcular las rentabilidades para ningún activo.")
