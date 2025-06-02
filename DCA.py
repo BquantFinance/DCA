@@ -325,9 +325,6 @@ if 'analisis_iniciado' in st.session_state and st.session_state.analisis_iniciad
             chart_container = st.empty()
             info_container = st.empty()
             
-            # Obtener todas las fechas para la animación
-            todas_fechas = sorted(set().union(*[rent.index for rent in rentabilidades.values()]))
-            
             # Función para crear gráfico animado
             def crear_grafico_animado(hasta_fecha=None, mostrar_valores_abs=False):
                 fig = go.Figure()
@@ -501,91 +498,90 @@ if 'analisis_iniciado' in st.session_state and st.session_state.analisis_iniciad
                 if len(fechas_comunes) == 0:
                     st.error("No hay fechas comunes entre los activos seleccionados")
                 else:
-                
-                fechas_comunes = sorted(fechas_comunes)
-                
-                # Crear un sampling inteligente para la animación
-                total_fechas = len(fechas_comunes)
-                if total_fechas > 150:
-                    # Si hay muchas fechas, hacer sampling
-                    step = max(1, total_fechas // 150)
-                    fechas_animacion = fechas_comunes[::step]
-                    # Asegurar que incluimos la última fecha
-                    if fechas_comunes[-1] not in fechas_animacion:
-                        fechas_animacion.append(fechas_comunes[-1])
-                else:
-                    fechas_animacion = fechas_comunes
-                
-                st.info(f"🎬 Iniciando animación con {len(fechas_animacion)} frames...")
-                progress_animacion = st.progress(0)
-                
-                for i, fecha_actual in enumerate(fechas_animacion):
-                    # Crear y mostrar gráfico
-                    fig = crear_grafico_animado(fecha_actual, mostrar_valores)
-                    chart_container.plotly_chart(fig, use_container_width=True, key=f"anim_{i}")
+                    fechas_comunes = sorted(fechas_comunes)
                     
-                    # Información en tiempo real mejorada
-                    rentabilidades_actuales = {}
-                    valores_actuales = {}
-                    inversiones_actuales = {}
+                    # Crear un sampling inteligente para la animación
+                    total_fechas = len(fechas_comunes)
+                    if total_fechas > 150:
+                        # Si hay muchas fechas, hacer sampling
+                        step = max(1, total_fechas // 150)
+                        fechas_animacion = fechas_comunes[::step]
+                        # Asegurar que incluimos la última fecha
+                        if fechas_comunes[-1] not in fechas_animacion:
+                            fechas_animacion.append(fechas_comunes[-1])
+                    else:
+                        fechas_animacion = fechas_comunes
                     
-                    for ticker in rentabilidades.keys():
-                        # Buscar el valor más cercano a la fecha actual
-                        ticker_data = rentabilidades[ticker].loc[rentabilidades[ticker].index <= fecha_actual]
-                        if len(ticker_data) > 0:
-                            rentabilidades_actuales[ticker] = ticker_data.iloc[-1]
-                        
-                        if ticker in valores_portfolio:
-                            valor_data = valores_portfolio[ticker].loc[valores_portfolio[ticker].index <= fecha_actual]
-                            if len(valor_data) > 0:
-                                valores_actuales[ticker] = valor_data.iloc[-1]
-                        
-                        if ticker in inversiones_acumuladas:
-                            inv_data = inversiones_acumuladas[ticker].loc[inversiones_acumuladas[ticker].index <= fecha_actual]
-                            if len(inv_data) > 0:
-                                inversiones_actuales[ticker] = inv_data.iloc[-1]
+                    st.info(f"🎬 Iniciando animación con {len(fechas_animacion)} frames...")
+                    progress_animacion = st.progress(0)
                     
-                    # Mostrar métricas actuales en formato mejorado
-                    if rentabilidades_actuales:
-                        cols_info = st.columns(min(len(rentabilidades_actuales), 4))
+                    for i, fecha_actual in enumerate(fechas_animacion):
+                        # Crear y mostrar gráfico
+                        fig = crear_grafico_animado(fecha_actual, mostrar_valores)
+                        chart_container.plotly_chart(fig, use_container_width=True, key=f"anim_{i}")
                         
-                        for j, ticker in enumerate(rentabilidades_actuales.keys()):
-                            with cols_info[j % 4]:
-                                emoji = ACTIVOS_PREDEFINIDOS.get(ticker, {}).get('emoji', '📈')
-                                color = ACTIVOS_PREDEFINIDOS.get(ticker, {}).get('color', '#1f77b4')
-                                
-                                rent_val = rentabilidades_actuales[ticker]
-                                valor_val = valores_actuales.get(ticker, 0)
-                                inv_val = inversiones_actuales.get(ticker, 0)
-                                
-                                # Determinar color de la métrica
-                                color_delta = "normal"
-                                if rent_val > 0:
+                        # Información en tiempo real mejorada
+                        rentabilidades_actuales = {}
+                        valores_actuales = {}
+                        inversiones_actuales = {}
+                        
+                        for ticker in rentabilidades.keys():
+                            # Buscar el valor más cercano a la fecha actual
+                            ticker_data = rentabilidades[ticker].loc[rentabilidades[ticker].index <= fecha_actual]
+                            if len(ticker_data) > 0:
+                                rentabilidades_actuales[ticker] = ticker_data.iloc[-1]
+                            
+                            if ticker in valores_portfolio:
+                                valor_data = valores_portfolio[ticker].loc[valores_portfolio[ticker].index <= fecha_actual]
+                                if len(valor_data) > 0:
+                                    valores_actuales[ticker] = valor_data.iloc[-1]
+                            
+                            if ticker in inversiones_acumuladas:
+                                inv_data = inversiones_acumuladas[ticker].loc[inversiones_acumuladas[ticker].index <= fecha_actual]
+                                if len(inv_data) > 0:
+                                    inversiones_actuales[ticker] = inv_data.iloc[-1]
+                        
+                        # Mostrar métricas actuales en formato mejorado
+                        if rentabilidades_actuales:
+                            cols_info = st.columns(min(len(rentabilidades_actuales), 4))
+                            
+                            for j, ticker in enumerate(rentabilidades_actuales.keys()):
+                                with cols_info[j % 4]:
+                                    emoji = ACTIVOS_PREDEFINIDOS.get(ticker, {}).get('emoji', '📈')
+                                    color = ACTIVOS_PREDEFINIDOS.get(ticker, {}).get('color', '#1f77b4')
+                                    
+                                    rent_val = rentabilidades_actuales[ticker]
+                                    valor_val = valores_actuales.get(ticker, 0)
+                                    inv_val = inversiones_actuales.get(ticker, 0)
+                                    
+                                    # Determinar color de la métrica
                                     color_delta = "normal"
-                                elif rent_val < 0:
-                                    color_delta = "inverse"
-                                
-                                if mostrar_valores:
-                                    st.metric(
-                                        label=f"{emoji} {ticker}",
-                                        value=f"${valor_val:,.0f}",
-                                        delta=f"{rent_val:+.1f}%",
-                                        delta_color=color_delta
-                                    )
-                                else:
-                                    st.metric(
-                                        label=f"{emoji} {ticker}",
-                                        value=f"{rent_val:.1f}%",
-                                        delta=f"${valor_val:,.0f}" if valor_val > 0 else None,
-                                        delta_color=color_delta
-                                    )
+                                    if rent_val > 0:
+                                        color_delta = "normal"
+                                    elif rent_val < 0:
+                                        color_delta = "inverse"
+                                    
+                                    if mostrar_valores:
+                                        st.metric(
+                                            label=f"{emoji} {ticker}",
+                                            value=f"${valor_val:,.0f}",
+                                            delta=f"{rent_val:+.1f}%",
+                                            delta_color=color_delta
+                                        )
+                                    else:
+                                        st.metric(
+                                            label=f"{emoji} {ticker}",
+                                            value=f"{rent_val:.1f}%",
+                                            delta=f"${valor_val:,.0f}" if valor_val > 0 else None,
+                                            delta_color=color_delta
+                                        )
+                        
+                        # Actualizar progreso
+                        progress_animacion.progress((i + 1) / len(fechas_animacion))
+                        time.sleep(velocidad_map[velocidad_animacion])
                     
-                    # Actualizar progreso
-                    progress_animacion.progress((i + 1) / len(fechas_animacion))
-                    time.sleep(velocidad_map[velocidad_animacion])
-                
-                progress_animacion.empty()
-                st.success("🎉 ¡Animación completada!")
+                    progress_animacion.empty()
+                    st.success("🎉 ¡Animación completada!")
                 
             elif 'mostrar_final' in st.session_state and st.session_state.mostrar_final:
                 st.session_state.mostrar_final = False  # Reset
@@ -625,6 +621,63 @@ if 'analisis_iniciado' in st.session_state and st.session_state.analisis_iniciad
             # Mostrar métricas en columnas
             if len(metricas_finales) <= 3:
                 cols_metricas = st.columns(len(metricas_finales))
+                for i, metrica in enumerate(metricas_finales):
+                    ticker = metrica['ticker']
+                    with cols_metricas[i]:
+                        emoji = ACTIVOS_PREDEFINIDOS.get(ticker, {}).get('emoji', '📈')
+                        color = ACTIVOS_PREDEFINIDOS.get(ticker, {}).get('color', '#1f77b4')
+                        
+                        # Determinar color del fondo basado en performance
+                        if metrica['rentabilidad'] >= 20:
+                            bg_intensity = "40"  # Verde fuerte
+                            text_color = "#00C851"
+                        elif metrica['rentabilidad'] >= 10:
+                            bg_intensity = "30"  # Verde medio
+                            text_color = "#00C851"
+                        elif metrica['rentabilidad'] >= 0:
+                            bg_intensity = "20"  # Verde suave
+                            text_color = "#00C851"
+                        elif metrica['rentabilidad'] >= -10:
+                            bg_intensity = "20"  # Naranja suave
+                            text_color = "#FF8800"
+                        else:
+                            bg_intensity = "30"  # Rojo
+                            text_color = "#FF4444"
+                        
+                        # Card personalizada con métricas mejoradas
+                        st.markdown(f"""
+                        <div style="
+                            background: linear-gradient(135deg, {color}{bg_intensity}, {color}10);
+                            border-left: 4px solid {color};
+                            padding: 1.2rem;
+                            border-radius: 12px;
+                            margin: 0.5rem 0;
+                            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+                        ">
+                            <div style="display: flex; align-items: center; margin-bottom: 0.5rem;">
+                                <span style="font-size: 1.5rem; margin-right: 0.5rem;">{emoji}</span>
+                                <h3 style="margin: 0; color: {color}; font-weight: bold;">{ticker}</h3>
+                            </div>
+                            
+                            <div style="margin: 0.8rem 0;">
+                                <p style="font-size: 2rem; font-weight: bold; margin: 0; color: {text_color};">
+                                    {metrica['rentabilidad']:+.1f}%
+                                </p>
+                            </div>
+                            
+                            <div style="font-size: 0.9rem; opacity: 0.9; line-height: 1.4;">
+                                <p style="margin: 0.2rem 0;">
+                                    💰 <strong>Valor Final:</strong> ${metrica['valor_final']:,.0f}
+                                </p>
+                                <p style="margin: 0.2rem 0;">
+                                    📊 <strong>Total Invertido:</strong> ${metrica['inversion_total']:,.0f}
+                                </p>
+                                <p style="margin: 0.2rem 0;">
+                                    {'🎉' if metrica['ganancia_neta'] >= 0 else '😔'} <strong>Ganancia:</strong> <span style="color: {text_color};">${metrica['ganancia_neta']:+,.0f}</span>
+                                </p>
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
             else:
                 # Si hay más de 3, hacer filas de 3
                 for i in range(0, len(metricas_finales), 3):
@@ -639,19 +692,19 @@ if 'analisis_iniciado' in st.session_state and st.session_state.analisis_iniciad
                             
                             # Determinar color del fondo basado en performance
                             if metrica['rentabilidad'] >= 20:
-                                bg_intensity = "40"  # Verde fuerte
+                                bg_intensity = "40"
                                 text_color = "#00C851"
                             elif metrica['rentabilidad'] >= 10:
-                                bg_intensity = "30"  # Verde medio
+                                bg_intensity = "30"
                                 text_color = "#00C851"
                             elif metrica['rentabilidad'] >= 0:
-                                bg_intensity = "20"  # Verde suave
+                                bg_intensity = "20"
                                 text_color = "#00C851"
                             elif metrica['rentabilidad'] >= -10:
-                                bg_intensity = "20"  # Naranja suave
+                                bg_intensity = "20"
                                 text_color = "#FF8800"
                             else:
-                                bg_intensity = "30"  # Rojo
+                                bg_intensity = "30"
                                 text_color = "#FF4444"
                             
                             # Card personalizada con métricas mejoradas
