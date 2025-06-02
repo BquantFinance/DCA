@@ -10,7 +10,7 @@ import json
 
 # Configuración de la página
 st.set_page_config(
-    page_title="DCA Evolution Visualizer",
+    page_title="BQuant-DCA Evolution Visualizer",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -58,7 +58,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Título principal con estilo
-st.markdown('<h1 class="main-header">📈 DCA Evolution Visualizer</h1>', unsafe_allow_html=True)
+st.markdown('<h1 class="main-header">📈 BQuant-DCA Evolution Visualizer</h1>', unsafe_allow_html=True)
 st.markdown('<p class="sub-header">Visualiza la evolución día a día de tu estrategia Dollar Cost Averaging</p>', unsafe_allow_html=True)
 
 # Diccionario de activos con colores vibrantes
@@ -500,88 +500,185 @@ if 'analisis_iniciado' in st.session_state and st.session_state.analisis_iniciad
                 else:
                     fechas_comunes = sorted(fechas_comunes)
                     
-                    # Crear un sampling inteligente para la animación
-                    total_fechas = len(fechas_comunes)
-                    if total_fechas > 150:
-                        # Si hay muchas fechas, hacer sampling
-                        step = max(1, total_fechas // 150)
-                        fechas_animacion = fechas_comunes[::step]
-                        # Asegurar que incluimos la última fecha
-                        if fechas_comunes[-1] not in fechas_animacion:
-                            fechas_animacion.append(fechas_comunes[-1])
-                    else:
-                        fechas_animacion = fechas_comunes
+                    # Crear interpolación suave para animación fluida
+                    st.info("🎬 Preparando animación suave...")
                     
-                    st.info(f"🎬 Iniciando animación con {len(fechas_animacion)} frames...")
+                    # Reducir fechas para mejor performance pero mantener suavidad
+                    step = max(1, len(fechas_comunes) // 100)  # Máximo 100 puntos clave
+                    fechas_clave = fechas_comunes[::step]
+                    if fechas_comunes[-1] not in fechas_clave:
+                        fechas_clave.append(fechas_comunes[-1])
+                    
+                    # Crear interpolación entre fechas clave para suavidad
+                    todas_fechas_interpoladas = []
+                    datos_interpolados = {ticker: [] for ticker in rentabilidades.keys()}
+                    
+                    for i in range(len(fechas_clave) - 1):
+                        fecha_actual = fechas_clave[i]
+                        fecha_siguiente = fechas_clave[i + 1]
+                        
+                        # Crear 5 frames intermedios entre cada fecha clave
+                        frames_intermedios = 5
+                        
+                        for frame in range(frames_intermedios + 1):
+                            # Interpolación temporal
+                            factor = frame / frames_intermedios
+                            
+                            # Fecha interpolada (aunque esto es más conceptual)
+                            diff_dias = (fecha_siguiente - fecha_actual).days
+                            dias_interpolados = int(diff_dias * factor)
+                            fecha_interpolada = fecha_actual + timedelta(days=dias_interpolados)
+                            
+                            todas_fechas_interpoladas.append(fecha_interpolada)
+                            
+                            # Interpolar valores para cada ticker
+                            for ticker in rentabilidades.keys():
+                                if ticker in rentabilidades:
+                                    # Obtener valores reales en las fechas clave
+                                    valor_actual = rentabilidades[ticker].loc[
+                                        rentabilidades[ticker].index <= fecha_actual
+                                    ].iloc[-1] if len(rentabilidades[ticker].loc[
+                                        rentabilidades[ticker].index <= fecha_actual
+                                    ]) > 0 else 0
+                                    
+                                    valor_siguiente = rentabilidades[ticker].loc[
+                                        rentabilidades[ticker].index <= fecha_siguiente
+                                    ].iloc[-1] if len(rentabilidades[ticker].loc[
+                                        rentabilidades[ticker].index <= fecha_siguiente
+                                    ]) > 0 else valor_actual
+                                    
+                                    # Interpolación suave (easing)
+                                    # Usar easing cuadrático para movimiento más natural
+                                    factor_suave = factor * factor * (3.0 - 2.0 * factor)  # smoothstep
+                                    valor_interpolado = valor_actual + (valor_siguiente - valor_actual) * factor_suave
+                                    
+                                    datos_interpolados[ticker].append(valor_interpolado)
+                    
+                    # Mostrar animación suave
+                    st.info(f"🎬 Reproduciendo animación suave con {len(todas_fechas_interpoladas)} frames...")
                     progress_animacion = st.progress(0)
                     
-                    for i, fecha_actual in enumerate(fechas_animacion):
-                        # Crear y mostrar gráfico
-                        fig = crear_grafico_animado(fecha_actual, mostrar_valores)
-                        chart_container.plotly_chart(fig, use_container_width=True, key=f"anim_{i}")
+                    # Crear el gráfico base una sola vez y actualizar solo los datos
+                    fig_base = go.Figure()
+                    
+                    # Configurar layout base
+                    template = "plotly_dark" if tema_oscuro else "plotly_white"
+                    
+                    fig_base.update_layout(
+                        title=dict(
+                            text=f"📊 Evolución DCA Suave - Inversión Mensual: ${st.session_state.inversion_analisis:,}",
+                            x=0.5,
+                            font=dict(size=20, color='white' if tema_oscuro else 'black')
+                        ),
+                        xaxis_title="📅 Fecha",
+                        yaxis_title="💰 Rentabilidad Acumulada (%)",
+                        template=template,
+                        hovermode='x unified',
+                        height=600,
+                        showlegend=True,
+                        xaxis=dict(
+                            showgrid=mostrar_grid,
+                            gridcolor='rgba(128,128,128,0.2)',
+                            range=[fechas_clave[0], fechas_clave[-1]]
+                        ),
+                        yaxis=dict(
+                            showgrid=mostrar_grid,
+                            gridcolor='rgba(128,128,128,0.2)',
+                            tickformat=".1f",
+                            ticksuffix="%"
+                        ),
+                        plot_bgcolor='rgba(0,0,0,0)',
+                        paper_bgcolor='rgba(0,0,0,0)',
+                        margin=dict(l=60, r=60, t=80, b=60),
+                        transition_duration=300,  # Transición suave entre frames
+                        transition_easing="cubic-in-out"
+                    )
+                    
+                    for i, fecha_frame in enumerate(todas_fechas_interpoladas):
+                        # Crear figura para este frame
+                        fig = go.Figure(fig_base)
                         
-                        # Información en tiempo real mejorada
-                        rentabilidades_actuales = {}
-                        valores_actuales = {}
-                        inversiones_actuales = {}
-                        
+                        # Añadir datos hasta este frame para cada ticker
                         for ticker in rentabilidades.keys():
-                            # Buscar el valor más cercano a la fecha actual
-                            ticker_data = rentabilidades[ticker].loc[rentabilidades[ticker].index <= fecha_actual]
-                            if len(ticker_data) > 0:
-                                rentabilidades_actuales[ticker] = ticker_data.iloc[-1]
-                            
-                            if ticker in valores_portfolio:
-                                valor_data = valores_portfolio[ticker].loc[valores_portfolio[ticker].index <= fecha_actual]
-                                if len(valor_data) > 0:
-                                    valores_actuales[ticker] = valor_data.iloc[-1]
-                            
-                            if ticker in inversiones_acumuladas:
-                                inv_data = inversiones_acumuladas[ticker].loc[inversiones_acumuladas[ticker].index <= fecha_actual]
-                                if len(inv_data) > 0:
-                                    inversiones_actuales[ticker] = inv_data.iloc[-1]
+                            if ticker in datos_interpolados:
+                                emoji = ACTIVOS_PREDEFINIDOS.get(ticker, {}).get('emoji', '📈')
+                                color = ACTIVOS_PREDEFINIDOS.get(ticker, {}).get('color', '#1f77b4')
+                                
+                                # Datos hasta el frame actual
+                                fechas_hasta_ahora = todas_fechas_interpoladas[:i+1]
+                                valores_hasta_ahora = datos_interpolados[ticker][:i+1]
+                                
+                                if len(valores_hasta_ahora) > 0:
+                                    fig.add_trace(go.Scatter(
+                                        x=fechas_hasta_ahora,
+                                        y=valores_hasta_ahora,
+                                        mode='lines',
+                                        name=f'{emoji} {ticker}',
+                                        line=dict(
+                                            color=color,
+                                            width=3,
+                                            smoothing=1.3
+                                        ),
+                                        hovertemplate=f'<b>{ticker}</b><br>' +
+                                                    'Fecha: %{x|%d/%m/%Y}<br>' +
+                                                    'Rentabilidad: %{y:.1f}%<br>' +
+                                                    '<extra></extra>',
+                                        connectgaps=True
+                                    ))
+                                    
+                                    # Añadir punto actual destacado
+                                    if i > 0:  # No en el primer frame
+                                        fig.add_trace(go.Scatter(
+                                            x=[fecha_frame],
+                                            y=[valores_hasta_ahora[-1]],
+                                            mode='markers',
+                                            name=f'{ticker}_current',
+                                            marker=dict(
+                                                color=color,
+                                                size=8,
+                                                symbol='circle',
+                                                line=dict(color='white', width=2)
+                                            ),
+                                            showlegend=False,
+                                            hoverinfo='skip'
+                                        ))
                         
-                        # Mostrar métricas actuales en formato mejorado
-                        if rentabilidades_actuales:
-                            cols_info = st.columns(min(len(rentabilidades_actuales), 4))
-                            
-                            for j, ticker in enumerate(rentabilidades_actuales.keys()):
-                                with cols_info[j % 4]:
-                                    emoji = ACTIVOS_PREDEFINIDOS.get(ticker, {}).get('emoji', '📈')
-                                    color = ACTIVOS_PREDEFINIDOS.get(ticker, {}).get('color', '#1f77b4')
-                                    
-                                    rent_val = rentabilidades_actuales[ticker]
-                                    valor_val = valores_actuales.get(ticker, 0)
-                                    inv_val = inversiones_actuales.get(ticker, 0)
-                                    
-                                    # Determinar color de la métrica
-                                    color_delta = "normal"
-                                    if rent_val > 0:
-                                        color_delta = "normal"
-                                    elif rent_val < 0:
-                                        color_delta = "inverse"
-                                    
-                                    if mostrar_valores:
+                        # Añadir indicador de fecha actual
+                        fig.add_annotation(
+                            text=f"📅 {fecha_frame.strftime('%d/%m/%Y')}",
+                            xref="paper", yref="paper",
+                            x=0.02, y=0.98,
+                            showarrow=False,
+                            font=dict(size=16, color="yellow"),
+                            bgcolor="rgba(0,0,0,0.7)",
+                            bordercolor="yellow",
+                            borderwidth=1,
+                            borderpad=8
+                        )
+                        
+                        # Mostrar gráfico
+                        chart_container.plotly_chart(fig, use_container_width=True, key=f"smooth_anim_{i}")
+                        
+                        # Mostrar progreso y métricas actuales de forma más sutil
+                        if i % 10 == 0:  # Solo cada 10 frames para no saturar
+                            cols_info = st.columns(len(rentabilidades))
+                            for j, ticker in enumerate(rentabilidades.keys()):
+                                with cols_info[j]:
+                                    if ticker in datos_interpolados and i < len(datos_interpolados[ticker]):
+                                        emoji = ACTIVOS_PREDEFINIDOS.get(ticker, {}).get('emoji', '📈')
+                                        valor_actual = datos_interpolados[ticker][i]
                                         st.metric(
                                             label=f"{emoji} {ticker}",
-                                            value=f"${valor_val:,.0f}",
-                                            delta=f"{rent_val:+.1f}%",
-                                            delta_color=color_delta
-                                        )
-                                    else:
-                                        st.metric(
-                                            label=f"{emoji} {ticker}",
-                                            value=f"{rent_val:.1f}%",
-                                            delta=f"${valor_val:,.0f}" if valor_val > 0 else None,
-                                            delta_color=color_delta
+                                            value=f"{valor_actual:.1f}%"
                                         )
                         
-                        # Actualizar progreso
-                        progress_animacion.progress((i + 1) / len(fechas_animacion))
-                        time.sleep(velocidad_map[velocidad_animacion])
+                        # Control de velocidad de animación suave
+                        delay = velocidad_map[velocidad_animacion] / 2  # Más rápido para compensar más frames
+                        progress_animacion.progress((i + 1) / len(todas_fechas_interpoladas))
+                        time.sleep(delay)
                     
                     progress_animacion.empty()
-                    st.success("🎉 ¡Animación completada!")
+                    st.success("🎉 ¡Animación suave completada!")
                 
             elif 'mostrar_final' in st.session_state and st.session_state.mostrar_final:
                 st.session_state.mostrar_final = False  # Reset
@@ -618,132 +715,49 @@ if 'analisis_iniciado' in st.session_state and st.session_state.analisis_iniciad
             # Ordenar por rentabilidad (mejor primero)
             metricas_finales.sort(key=lambda x: x['rentabilidad'], reverse=True)
             
-            # Mostrar métricas en columnas
-            if len(metricas_finales) <= 3:
-                cols_metricas = st.columns(len(metricas_finales))
-                for i, metrica in enumerate(metricas_finales):
-                    ticker = metrica['ticker']
-                    with cols_metricas[i]:
-                        emoji = ACTIVOS_PREDEFINIDOS.get(ticker, {}).get('emoji', '📈')
-                        color = ACTIVOS_PREDEFINIDOS.get(ticker, {}).get('color', '#1f77b4')
-                        
-                        # Determinar color del fondo basado en performance
-                        if metrica['rentabilidad'] >= 20:
-                            bg_intensity = "40"  # Verde fuerte
-                            text_color = "#00C851"
-                        elif metrica['rentabilidad'] >= 10:
-                            bg_intensity = "30"  # Verde medio
-                            text_color = "#00C851"
-                        elif metrica['rentabilidad'] >= 0:
-                            bg_intensity = "20"  # Verde suave
-                            text_color = "#00C851"
-                        elif metrica['rentabilidad'] >= -10:
-                            bg_intensity = "20"  # Naranja suave
-                            text_color = "#FF8800"
+            # Mostrar métricas en columnas con formato mejorado
+            cols_metricas = st.columns(min(len(metricas_finales), 3))
+            
+            for i, metrica in enumerate(metricas_finales):
+                ticker = metrica['ticker']
+                with cols_metricas[i % 3]:
+                    emoji = ACTIVOS_PREDEFINIDOS.get(ticker, {}).get('emoji', '📈')
+                    color = ACTIVOS_PREDEFINIDOS.get(ticker, {}).get('color', '#1f77b4')
+                    
+                    # Usar métricas nativas de Streamlit en lugar de HTML personalizado
+                    st.markdown(f"### {emoji} {ticker}")
+                    
+                    # Métrica principal
+                    col1, col2 = st.columns([2, 1])
+                    with col1:
+                        st.metric(
+                            label="Rentabilidad",
+                            value=f"{metrica['rentabilidad']:+.1f}%",
+                            delta=f"${metrica['ganancia_neta']:+,.0f}"
+                        )
+                    
+                    with col2:
+                        # Indicador visual de performance
+                        if metrica['rentabilidad'] >= 0:
+                            st.success("✅ Positivo")
                         else:
-                            bg_intensity = "30"  # Rojo
-                            text_color = "#FF4444"
-                        
-                        # Card personalizada con métricas mejoradas
-                        st.markdown(f"""
-                        <div style="
-                            background: linear-gradient(135deg, {color}{bg_intensity}, {color}10);
-                            border-left: 4px solid {color};
-                            padding: 1.2rem;
-                            border-radius: 12px;
-                            margin: 0.5rem 0;
-                            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-                        ">
-                            <div style="display: flex; align-items: center; margin-bottom: 0.5rem;">
-                                <span style="font-size: 1.5rem; margin-right: 0.5rem;">{emoji}</span>
-                                <h3 style="margin: 0; color: {color}; font-weight: bold;">{ticker}</h3>
-                            </div>
-                            
-                            <div style="margin: 0.8rem 0;">
-                                <p style="font-size: 2rem; font-weight: bold; margin: 0; color: {text_color};">
-                                    {metrica['rentabilidad']:+.1f}%
-                                </p>
-                            </div>
-                            
-                            <div style="font-size: 0.9rem; opacity: 0.9; line-height: 1.4;">
-                                <p style="margin: 0.2rem 0;">
-                                    💰 <strong>Valor Final:</strong> ${metrica['valor_final']:,.0f}
-                                </p>
-                                <p style="margin: 0.2rem 0;">
-                                    📊 <strong>Total Invertido:</strong> ${metrica['inversion_total']:,.0f}
-                                </p>
-                                <p style="margin: 0.2rem 0;">
-                                    {'🎉' if metrica['ganancia_neta'] >= 0 else '😔'} <strong>Ganancia:</strong> <span style="color: {text_color};">${metrica['ganancia_neta']:+,.0f}</span>
-                                </p>
-                            </div>
-                        </div>
-                        """, unsafe_allow_html=True)
-            else:
-                # Si hay más de 3, hacer filas de 3
-                for i in range(0, len(metricas_finales), 3):
-                    cols_metricas = st.columns(min(3, len(metricas_finales) - i))
-                    grupo_metricas = metricas_finales[i:i+3]
+                            st.error("❌ Negativo")
                     
-                    for j, metrica in enumerate(grupo_metricas):
-                        ticker = metrica['ticker']
-                        with cols_metricas[j]:
-                            emoji = ACTIVOS_PREDEFINIDOS.get(ticker, {}).get('emoji', '📈')
-                            color = ACTIVOS_PREDEFINIDOS.get(ticker, {}).get('color', '#1f77b4')
-                            
-                            # Determinar color del fondo basado en performance
-                            if metrica['rentabilidad'] >= 20:
-                                bg_intensity = "40"
-                                text_color = "#00C851"
-                            elif metrica['rentabilidad'] >= 10:
-                                bg_intensity = "30"
-                                text_color = "#00C851"
-                            elif metrica['rentabilidad'] >= 0:
-                                bg_intensity = "20"
-                                text_color = "#00C851"
-                            elif metrica['rentabilidad'] >= -10:
-                                bg_intensity = "20"
-                                text_color = "#FF8800"
-                            else:
-                                bg_intensity = "30"
-                                text_color = "#FF4444"
-                            
-                            # Card personalizada con métricas mejoradas
-                            st.markdown(f"""
-                            <div style="
-                                background: linear-gradient(135deg, {color}{bg_intensity}, {color}10);
-                                border-left: 4px solid {color};
-                                padding: 1.2rem;
-                                border-radius: 12px;
-                                margin: 0.5rem 0;
-                                box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-                            ">
-                                <div style="display: flex; align-items: center; margin-bottom: 0.5rem;">
-                                    <span style="font-size: 1.5rem; margin-right: 0.5rem;">{emoji}</span>
-                                    <h3 style="margin: 0; color: {color}; font-weight: bold;">{ticker}</h3>
-                                </div>
-                                
-                                <div style="margin: 0.8rem 0;">
-                                    <p style="font-size: 2rem; font-weight: bold; margin: 0; color: {text_color};">
-                                        {metrica['rentabilidad']:+.1f}%
-                                    </p>
-                                </div>
-                                
-                                <div style="font-size: 0.9rem; opacity: 0.9; line-height: 1.4;">
-                                    <p style="margin: 0.2rem 0;">
-                                        💰 <strong>Valor Final:</strong> ${metrica['valor_final']:,.0f}
-                                    </p>
-                                    <p style="margin: 0.2rem 0;">
-                                        📊 <strong>Total Invertido:</strong> ${metrica['inversion_total']:,.0f}
-                                    </p>
-                                    <p style="margin: 0.2rem 0;">
-                                        {'🎉' if metrica['ganancia_neta'] >= 0 else '😔'} <strong>Ganancia:</strong> <span style="color: {text_color};">${metrica['ganancia_neta']:+,.0f}</span>
-                                    </p>
-                                </div>
-                            </div>
-                            """, unsafe_allow_html=True)
+                    # Información adicional
+                    st.info(f"""
+                    **💰 Valor Final:** ${metrica['valor_final']:,.0f}
                     
-                    if i + 3 < len(metricas_finales):
-                        st.markdown("")  # Espacio entre filas
+                    **📊 Total Invertido:** ${metrica['inversion_total']:,.0f}
+                    
+                    **📈 ROI:** {((metrica['valor_final'] / metrica['inversion_total']) - 1) * 100:.1f}%
+                    """)
+                    
+                    st.markdown("---")
+                
+                # Nueva fila cada 3 elementos
+                if (i + 1) % 3 == 0 and i + 1 < len(metricas_finales):
+                    cols_metricas = st.columns(min(len(metricas_finales) - i - 1, 3))
+
             
             # Resumen general
             if len(metricas_finales) > 1:
