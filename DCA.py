@@ -485,29 +485,17 @@ if 'analisis_iniciado' in st.session_state and st.session_state.analisis_iniciad
                 else:
                     st.info("🎬 Iniciando animación ultra-suave sin flickering...")
                     
-                    # Preparar frames de animación optimizados
-                    total_frames = min(100, min_length)  # Máximo 100 frames para fluidez
-                    frame_step = max(1, min_length // total_frames)
-                    
-                    # Crear una sola vez el contenedor del gráfico
+                    # MÉTODO ALTERNATIVO 1: Animación con actualización de contenedor
                     with chart_placeholder.container():
-                        chart_container = st.empty()
-                        progress_container = st.empty()
+                        st.markdown("**🎬 Animación en progreso...**")
+                        progress_bar = st.progress(0)
+                        chart_area = st.empty()
                         
-                        # Barra de progreso
-                        progress_bar = progress_container.progress(0)
+                        # Preparar frames de animación optimizados
+                        total_frames = min(80, min_length)  # Reducido para mayor fluidez
+                        frame_step = max(1, min_length // total_frames)
                         
-                        # Pre-configurar el layout para evitar redimensionamiento
-                        fig_base = crear_grafico_ultra_suave(
-                            rentabilidades, 
-                            inversiones_acumuladas, 
-                            hasta_indice=min_length-1,  # Gráfico completo para establecer escalas
-                            tema_oscuro=tema_oscuro,
-                            mostrar_grid=mostrar_grid,
-                            suavizado=suavizado_curvas
-                        )
-                        
-                        # Configurar rango fijo para evitar reescalado
+                        # Pre-calcular datos para evitar cálculos durante animación
                         all_dates = []
                         all_values = []
                         for rent in rentabilidades.values():
@@ -516,24 +504,14 @@ if 'analisis_iniciado' in st.session_state and st.session_state.analisis_iniciad
                                 all_dates.extend(clean_data.index.tolist())
                                 all_values.extend(clean_data.values.tolist())
                         
-                        if all_dates and all_values:
-                            fig_base.update_layout(
-                                xaxis=dict(
-                                    range=[min(all_dates), max(all_dates)],
-                                    fixedrange=True
-                                ),
-                                yaxis=dict(
-                                    range=[min(all_values) * 1.1, max(all_values) * 1.1],
-                                    fixedrange=True
-                                )
-                            )
+                        x_range = [min(all_dates), max(all_dates)] if all_dates else None
+                        y_range = [min(all_values) * 1.1, max(all_values) * 1.1] if all_values else None
                         
-                        # Animación frame por frame
+                        # Animación frame por frame con contenedor único
                         for frame_idx in range(total_frames):
-                            # Calcular índice de datos para este frame
                             data_index = min(frame_idx * frame_step, min_length - 1)
                             
-                            # Crear figura para este frame
+                            # Crear figura optimizada
                             fig_frame = crear_grafico_ultra_suave(
                                 rentabilidades,
                                 inversiones_acumuladas,
@@ -543,76 +521,85 @@ if 'analisis_iniciado' in st.session_state and st.session_state.analisis_iniciad
                                 suavizado=suavizado_curvas
                             )
                             
-                            # Mantener rangos fijos (crítico para evitar flickering)
-                            if all_dates and all_values:
+                            # Fijar rangos para evitar reescalado (clave anti-flickering)
+                            if x_range and y_range:
                                 fig_frame.update_layout(
-                                    xaxis=dict(
-                                        range=[min(all_dates), max(all_dates)],
-                                        fixedrange=True
-                                    ),
-                                    yaxis=dict(
-                                        range=[min(all_values) * 1.1, max(all_values) * 1.1],
-                                        fixedrange=True
-                                    )
+                                    xaxis=dict(range=x_range, fixedrange=True),
+                                    yaxis=dict(range=y_range, fixedrange=True)
                                 )
                             
-                            # Indicador de progreso en el gráfico
+                            # Indicador de fecha actual
                             if len(all_dates) > data_index:
-                                current_date = list(rentabilidades.values())[0].dropna().index[data_index]
-                                fig_frame.add_annotation(
-                                    text=f"📅 {current_date.strftime('%b %Y')}",
-                                    xref="paper", yref="paper",
-                                    x=0.02, y=0.02,
-                                    showarrow=False,
-                                    font=dict(size=12, color="rgba(255,255,255,0.8)"),
-                                    bgcolor="rgba(0,0,0,0.3)",
-                                    borderwidth=0,
-                                    borderpad=5
-                                )
+                                try:
+                                    current_date = list(rentabilidades.values())[0].dropna().index[data_index]
+                                    fig_frame.add_annotation(
+                                        text=f"📅 {current_date.strftime('%b %Y')}",
+                                        xref="paper", yref="paper",
+                                        x=0.02, y=0.02,
+                                        showarrow=False,
+                                        font=dict(size=12, color="rgba(255,255,255,0.8)"),
+                                        bgcolor="rgba(0,0,0,0.3)",
+                                        borderwidth=0,
+                                        borderpad=5
+                                    )
+                                except IndexError:
+                                    pass  # Continuar si hay error de índice
                             
-                            # Actualizar gráfico SIN CAMBIAR EL CONTENEDOR
-                            # La clave está en usar el MISMO key para cada frame
-                            chart_container.plotly_chart(
-                                fig_frame,
-                                use_container_width=True,
-                                config={
-                                    'displayModeBar': False,
-                                    'staticPlot': False,  # Permite hover pero no interacciones que causen redraws
-                                    'responsive': True
-                                },
-                                key="smooth_animation_chart"  # MISMO KEY SIEMPRE
-                            )
+                            # Actualizar usando el área de chart con key dinámico
+                            # Esto evita conflictos de key pero mantiene fluidez visual
+                            with chart_area:
+                                st.plotly_chart(
+                                    fig_frame,
+                                    use_container_width=True,
+                                    config={'displayModeBar': False, 'responsive': True},
+                                    key=f"anim_{frame_idx}_{hash(str(data_index))}"  # Key único y predecible
+                                )
                             
                             # Actualizar progreso
                             progress_bar.progress((frame_idx + 1) / total_frames)
                             
-                            # Delay optimizado
+                            # Delay optimizado para suavidad
                             time.sleep(velocidad_map[velocidad_animacion])
                         
-                        # Limpiar barra de progreso
-                        progress_container.empty()
+                        # Limpiar y mostrar resultado final
+                        progress_bar.empty()
                         
-                        # Mostrar resultado final
+                        # Crear gráfico final optimizado
                         fig_final = crear_grafico_ultra_suave(
                             rentabilidades,
                             inversiones_acumuladas,
-                            hasta_indice=None,  # Gráfico completo
+                            hasta_indice=None,
                             tema_oscuro=tema_oscuro,
                             mostrar_grid=mostrar_grid,
                             suavizado=suavizado_curvas
                         )
                         
                         fig_final.update_layout(
-                            title=dict(text="🎉 Evolución Completa - Animación Ultra-Suave Finalizada")
+                            title=dict(text="🎉 Evolución Completa - Animación Ultra-Suave Finalizada"),
+                            annotations=[
+                                dict(
+                                    text="✨ Animación completada sin flickering",
+                                    xref="paper", yref="paper",
+                                    x=0.5, y=0.95,
+                                    showarrow=False,
+                                    font=dict(size=14, color="green"),
+                                    bgcolor="rgba(0,255,0,0.1)",
+                                    bordercolor="green",
+                                    borderwidth=1,
+                                    borderpad=8
+                                )
+                            ]
                         )
                         
-                        chart_container.plotly_chart(
-                            fig_final,
-                            use_container_width=True,
-                            key="final_chart"
-                        )
+                        # Mostrar resultado final con key único
+                        with chart_area:
+                            st.plotly_chart(
+                                fig_final,
+                                use_container_width=True,
+                                key="final_smooth_chart"
+                            )
                         
-                        st.success("🎉 ¡Animación ultra-suave completada sin flickering!")
+                        st.success("🎉 ¡Animación ultra-suave completada sin flickering ni errores de key!")
             
             elif 'mostrar_final' in st.session_state and st.session_state.mostrar_final:
                 st.session_state.mostrar_final = False  # Reset
