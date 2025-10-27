@@ -7,16 +7,18 @@ import yfinance as yf
 from datetime import datetime, timedelta
 import time
 import json
+from io import BytesIO
+import calendar
 
 # Configuración de la página
 st.set_page_config(
-    page_title="BQuant-DCA Evolution Visualizer",
+    page_title="BQuant-DCA Pro Visualizer v3.0",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# CSS personalizado para mejor apariencia y animaciones suaves
+# CSS personalizado mejorado
 st.markdown("""
 <style>
     .main-header {
@@ -48,29 +50,40 @@ st.markdown("""
         padding: 0.5rem 1rem;
         font-weight: 600;
     }
-    .animation-controls {
-        background: rgba(255, 255, 255, 0.05);
+    .portfolio-preset {
+        background: rgba(102, 126, 234, 0.1);
         padding: 1rem;
-        border-radius: 10px;
-        margin: 1rem 0;
+        border-radius: 8px;
+        margin: 0.5rem 0;
+        border: 1px solid rgba(102, 126, 234, 0.3);
     }
-    /* Critical: Prevent chart container from resizing */
     div[data-testid="stPlotlyChart"] > div {
         transition: none !important;
         animation: none !important;
     }
-    /* Smooth fade transitions for info updates */
     .info-container {
         transition: opacity 0.2s ease-in-out;
+    }
+    .badge {
+        display: inline-block;
+        padding: 0.25rem 0.5rem;
+        border-radius: 4px;
+        font-size: 0.8rem;
+        font-weight: 600;
+        margin: 0.2rem;
+    }
+    .badge-new {
+        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+        color: white;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# Título principal con estilo
-st.markdown('<h1 class="main-header">📈 BQuant-DCA Evolution Visualizer</h1>', unsafe_allow_html=True)
-st.markdown('<p class="sub-header">Visualiza la evolución día a día de tu estrategia Dollar Cost Averaging</p>', unsafe_allow_html=True)
+# Título principal
+st.markdown('<h1 class="main-header">📈 BQuant-DCA Pro Visualizer v3.0</h1>', unsafe_allow_html=True)
+st.markdown('<p class="sub-header">Análisis Avanzado de Dollar Cost Averaging con Portfolio Management</p>', unsafe_allow_html=True)
 
-# Diccionario de activos con colores vibrantes
+# Diccionario de activos predefinidos
 ACTIVOS_PREDEFINIDOS = {
     'SPY': {'nombre': 'SPDR S&P 500 ETF', 'color': '#FF6B6B', 'emoji': '🇺🇸'},
     'VTI': {'nombre': 'Vanguard Total Stock Market', 'color': '#4ECDC4', 'emoji': '📊'},
@@ -89,7 +102,34 @@ ACTIVOS_PREDEFINIDOS = {
     'AMZN': {'nombre': 'Amazon', 'color': '#FF8C00', 'emoji': '📦'}
 }
 
-# Función para descargar datos de yfinance
+# Portfolios predefinidos
+PORTFOLIO_PRESETS = {
+    'Agresivo': {
+        'descripcion': '100% Acciones - Alto crecimiento',
+        'allocations': {'SPY': 60, 'QQQ': 30, 'VWO': 10}
+    },
+    'Moderado': {
+        'descripcion': '70/30 - Balance crecimiento/estabilidad',
+        'allocations': {'SPY': 50, 'BND': 30, 'VEA': 20}
+    },
+    'Conservador': {
+        'descripcion': '40/60 - Enfoque en preservación',
+        'allocations': {'BND': 60, 'SPY': 30, 'GLD': 10}
+    },
+    'Tech Heavy': {
+        'descripcion': 'Enfoque en tecnología',
+        'allocations': {'QQQ': 50, 'MSFT': 20, 'NVDA': 15, 'AAPL': 15}
+    },
+    '60/40 Clásico': {
+        'descripcion': 'Portfolio clásico balanceado',
+        'allocations': {'VTI': 60, 'BND': 40}
+    }
+}
+
+# ============================================================================
+# FUNCIONES DE CÁLCULO AVANZADAS
+# ============================================================================
+
 @st.cache_data(ttl=3600)
 def descargar_datos_yfinance(tickers, fecha_inicio, fecha_fin):
     """Descarga datos históricos de Yahoo Finance"""
@@ -105,148 +145,592 @@ def descargar_datos_yfinance(tickers, fecha_inicio, fecha_fin):
         st.error(f"❌ Error descargando datos: {str(e)}")
         return None
 
-# Función para calcular DCA correctamente
-def calcular_dca_detallado(precios, inversion_mensual=100):
-    """Calcula rentabilidad DCA día a día correctamente"""
-    if precios is None or len(precios) == 0:
-        return pd.Series(dtype=float), pd.Series(dtype=float), pd.Series(dtype=float)
+def generar_fechas_inversion(fecha_inicio, fecha_fin, frecuencia='monthly', dias_especificos=None, 
+                             dia_semana=None, fechas_pausa=None):
+    """
+    Genera fechas de inversión según configuración avanzada
     
-    # Limpiar datos de precios
-    precios_clean = precios.dropna()
-    if len(precios_clean) == 0:
-        return pd.Series(dtype=float), pd.Series(dtype=float), pd.Series(dtype=float)
+    Args:
+        fecha_inicio: Fecha de inicio
+        fecha_fin: Fecha de fin
+        frecuencia: 'daily', 'weekly', 'biweekly', 'monthly', 'quarterly', 'custom'
+        dias_especificos: Lista de días del mes [1, 15] para frecuencia mensual
+        dia_semana: 0-6 (Lunes-Domingo) para frecuencia semanal
+        fechas_pausa: Lista de tuplas (inicio, fin) para períodos sin inversión
+    """
+    fechas = []
+    fecha_actual = pd.Timestamp(fecha_inicio)
+    fecha_final = pd.Timestamp(fecha_fin)
     
-    # Crear fechas de inversión mensual (primer día hábil de cada mes)
-    fechas_inversion = []
-    fecha_actual = precios_clean.index[0]
+    if fechas_pausa is None:
+        fechas_pausa = []
     
-    while fecha_actual <= precios_clean.index[-1]:
-        # Buscar el primer día del mes que tenga datos
-        primer_dia_mes = fecha_actual.replace(day=1)
+    def esta_en_pausa(fecha):
+        """Verifica si una fecha está en período de pausa"""
+        for inicio, fin in fechas_pausa:
+            if pd.Timestamp(inicio) <= fecha <= pd.Timestamp(fin):
+                return True
+        return False
+    
+    if frecuencia == 'daily':
+        # Inversión diaria (días hábiles)
+        fecha_range = pd.bdate_range(start=fecha_inicio, end=fecha_fin)
+        fechas = [f for f in fecha_range if not esta_en_pausa(f)]
         
-        # Encontrar el primer día con datos en este mes
-        dias_mes = precios_clean.index[
-            (precios_clean.index >= primer_dia_mes) & 
-            (precios_clean.index < primer_dia_mes + pd.DateOffset(months=1))
-        ]
-        
-        if len(dias_mes) > 0:
-            fechas_inversion.append(dias_mes[0])
-        
-        # Siguiente mes
-        fecha_actual = primer_dia_mes + pd.DateOffset(months=1)
+    elif frecuencia == 'weekly':
+        # Inversión semanal
+        dia = dia_semana if dia_semana is not None else 0  # Lunes por defecto
+        while fecha_actual <= fecha_final:
+            # Ajustar al día de la semana especificado
+            dias_hasta = (dia - fecha_actual.weekday()) % 7
+            fecha_objetivo = fecha_actual + timedelta(days=dias_hasta)
+            if fecha_objetivo <= fecha_final and not esta_en_pausa(fecha_objetivo):
+                fechas.append(fecha_objetivo)
+            fecha_actual += timedelta(weeks=1)
     
-    if len(fechas_inversion) == 0:
-        return pd.Series(dtype=float), pd.Series(dtype=float), pd.Series(dtype=float)
+    elif frecuencia == 'biweekly':
+        # Inversión quincenal
+        while fecha_actual <= fecha_final:
+            if not esta_en_pausa(fecha_actual):
+                fechas.append(fecha_actual)
+            fecha_actual += timedelta(weeks=2)
     
-    # Inicializar series para resultados
-    acciones_totales = 0.0
-    inversion_total = 0.0
-    
-    # Series para almacenar resultados día a día
-    rentabilidad_diaria = pd.Series(index=precios_clean.index, dtype=float)
-    valor_portfolio_diario = pd.Series(index=precios_clean.index, dtype=float)
-    inversion_acumulada_diaria = pd.Series(index=precios_clean.index, dtype=float)
-    
-    # Calcular DCA día a día
-    for fecha in precios_clean.index:
-        # Verificar si es día de inversión
-        if fecha in fechas_inversion:
-            precio_compra = precios_clean.loc[fecha]
-            if precio_compra > 0:
-                # Comprar acciones con la inversión mensual
-                nuevas_acciones = inversion_mensual / precio_compra
-                acciones_totales += nuevas_acciones
-                inversion_total += inversion_mensual
-        
-        # Calcular valor del portfolio hoy
-        precio_actual = precios_clean.loc[fecha]
-        valor_portfolio_hoy = acciones_totales * precio_actual
-        
-        # Calcular rentabilidad acumulada
-        if inversion_total > 0:
-            rentabilidad_hoy = ((valor_portfolio_hoy / inversion_total) - 1) * 100
+    elif frecuencia == 'monthly':
+        # Inversión mensual (primer día hábil o días específicos)
+        if dias_especificos and len(dias_especificos) > 0:
+            # Días específicos del mes
+            while fecha_actual <= fecha_final:
+                for dia in dias_especificos:
+                    try:
+                        fecha_objetivo = fecha_actual.replace(day=dia)
+                        if fecha_objetivo <= fecha_final and not esta_en_pausa(fecha_objetivo):
+                            fechas.append(fecha_objetivo)
+                    except ValueError:
+                        # Día no válido para este mes (ej: 31 en febrero)
+                        pass
+                fecha_actual = fecha_actual + pd.DateOffset(months=1)
+                fecha_actual = fecha_actual.replace(day=1)
         else:
-            rentabilidad_hoy = 0.0
+            # Primer día del mes
+            while fecha_actual <= fecha_final:
+                primer_dia = fecha_actual.replace(day=1)
+                if primer_dia <= fecha_final and not esta_en_pausa(primer_dia):
+                    fechas.append(primer_dia)
+                fecha_actual = fecha_actual + pd.DateOffset(months=1)
+    
+    elif frecuencia == 'quarterly':
+        # Inversión trimestral
+        while fecha_actual <= fecha_final:
+            if not esta_en_pausa(fecha_actual):
+                fechas.append(fecha_actual)
+            fecha_actual = fecha_actual + pd.DateOffset(months=3)
+    
+    elif frecuencia == 'custom':
+        # Las fechas personalizadas se pasan directamente
+        fechas = dias_especificos if dias_especificos else []
+    
+    return sorted(set(fechas))
+
+def calcular_dca_portfolio_avanzado(precios_dict, config_portfolio):
+    """
+    Calcula DCA para un portfolio con asignaciones personalizadas y configuración avanzada
+    
+    Args:
+        precios_dict: Dict con precios por ticker
+        config_portfolio: Dict con configuración del portfolio
+            - allocations: Dict {ticker: porcentaje}
+            - inversion_total: Cantidad total a invertir
+            - fechas_inversion: Lista de fechas de inversión
+            - lump_sum: Cantidad inicial (opcional)
+            - aumentos_anuales: % de aumento anual (opcional)
+            - rebalanceo: Frecuencia de rebalanceo (opcional)
+    """
+    allocations = config_portfolio['allocations']
+    inversion_por_periodo = config_portfolio['inversion_total']
+    fechas_inversion = config_portfolio['fechas_inversion']
+    lump_sum = config_portfolio.get('lump_sum', 0)
+    aumentos_anuales = config_portfolio.get('aumentos_anuales', 0)
+    
+    # Normalizar asignaciones si no suman 100%
+    total_alloc = sum(allocations.values())
+    if total_alloc != 100:
+        allocations = {k: (v/total_alloc)*100 for k, v in allocations.items()}
+    
+    # Obtener todas las fechas de la serie
+    todas_las_fechas = None
+    for ticker in precios_dict.keys():
+        if todas_las_fechas is None:
+            todas_las_fechas = precios_dict[ticker].index
+        else:
+            todas_las_fechas = todas_las_fechas.union(precios_dict[ticker].index)
+    
+    todas_las_fechas = sorted(todas_las_fechas)
+    
+    # Inicializar variables
+    acciones_por_ticker = {ticker: 0.0 for ticker in allocations.keys()}
+    inversion_total_acumulada = 0.0
+    año_actual = todas_las_fechas[0].year if todas_las_fechas else datetime.now().year
+    inversion_actual = inversion_por_periodo
+    
+    # Series de resultados
+    valor_portfolio_series = pd.Series(index=todas_las_fechas, dtype=float)
+    inversion_acumulada_series = pd.Series(index=todas_las_fechas, dtype=float)
+    rentabilidad_series = pd.Series(index=todas_las_fechas, dtype=float)
+    
+    # Resultados detallados por ticker
+    resultados_por_ticker = {
+        ticker: {
+            'acciones': pd.Series(index=todas_las_fechas, dtype=float),
+            'valor': pd.Series(index=todas_las_fechas, dtype=float),
+            'inversion': pd.Series(index=todas_las_fechas, dtype=float)
+        }
+        for ticker in allocations.keys()
+    }
+    
+    # Procesar lump sum inicial
+    if lump_sum > 0 and todas_las_fechas:
+        fecha_inicial = todas_las_fechas[0]
+        for ticker, porcentaje in allocations.items():
+            if ticker in precios_dict:
+                precio_inicial = precios_dict[ticker].loc[fecha_inicial] if fecha_inicial in precios_dict[ticker].index else None
+                if precio_inicial and precio_inicial > 0:
+                    cantidad_invertir = lump_sum * (porcentaje / 100)
+                    acciones_por_ticker[ticker] += cantidad_invertir / precio_inicial
+        inversion_total_acumulada += lump_sum
+    
+    # Procesar cada fecha
+    for fecha in todas_las_fechas:
+        # Verificar si es fecha de inversión
+        if fecha in fechas_inversion:
+            # Aplicar aumentos anuales
+            if fecha.year > año_actual and aumentos_anuales > 0:
+                años_transcurridos = fecha.year - año_actual
+                inversion_actual = inversion_por_periodo * ((1 + aumentos_anuales/100) ** años_transcurridos)
+            
+            # Invertir según asignaciones
+            for ticker, porcentaje in allocations.items():
+                if ticker in precios_dict and fecha in precios_dict[ticker].index:
+                    precio_compra = precios_dict[ticker].loc[fecha]
+                    if precio_compra > 0:
+                        cantidad_invertir = inversion_actual * (porcentaje / 100)
+                        nuevas_acciones = cantidad_invertir / precio_compra
+                        acciones_por_ticker[ticker] += nuevas_acciones
+                        inversion_total_acumulada += cantidad_invertir
+        
+        # Calcular valor del portfolio en esta fecha
+        valor_total_hoy = 0.0
+        for ticker, num_acciones in acciones_por_ticker.items():
+            if ticker in precios_dict and fecha in precios_dict[ticker].index:
+                precio_actual = precios_dict[ticker].loc[fecha]
+                valor_ticker = num_acciones * precio_actual
+                valor_total_hoy += valor_ticker
+                
+                # Guardar detalles por ticker
+                resultados_por_ticker[ticker]['acciones'].loc[fecha] = num_acciones
+                resultados_por_ticker[ticker]['valor'].loc[fecha] = valor_ticker
+        
+        # Calcular rentabilidad
+        if inversion_total_acumulada > 0:
+            rentabilidad = ((valor_total_hoy / inversion_total_acumulada) - 1) * 100
+        else:
+            rentabilidad = 0.0
         
         # Guardar valores
-        rentabilidad_diaria.loc[fecha] = rentabilidad_hoy
-        valor_portfolio_diario.loc[fecha] = valor_portfolio_hoy
-        inversion_acumulada_diaria.loc[fecha] = inversion_total
+        valor_portfolio_series.loc[fecha] = valor_total_hoy
+        inversion_acumulada_series.loc[fecha] = inversion_total_acumulada
+        rentabilidad_series.loc[fecha] = rentabilidad
     
-    # Reindexar a toda la serie original (rellenar valores faltantes)
-    rentabilidad_completa = rentabilidad_diaria.reindex(precios.index).ffill().fillna(0)
-    valor_completo = valor_portfolio_diario.reindex(precios.index).ffill().fillna(0)
-    inversion_completa = inversion_acumulada_diaria.reindex(precios.index).ffill().fillna(0)
-    
-    return rentabilidad_completa, valor_completo, inversion_completa
+    return {
+        'rentabilidad': rentabilidad_series,
+        'valor_portfolio': valor_portfolio_series,
+        'inversion_acumulada': inversion_acumulada_series,
+        'detalles_por_ticker': resultados_por_ticker,
+        'acciones_finales': acciones_por_ticker
+    }
 
-# Sidebar - Configuración elegante
+def calcular_lump_sum_comparison(precios_dict, allocations, monto_inicial, fecha_inicio):
+    """Calcula el rendimiento de una inversión lump sum para comparación"""
+    # Normalizar asignaciones
+    total_alloc = sum(allocations.values())
+    if total_alloc != 100:
+        allocations = {k: (v/total_alloc)*100 for k, v in allocations.items()}
+    
+    # Obtener todas las fechas
+    todas_las_fechas = None
+    for ticker in precios_dict.keys():
+        if todas_las_fechas is None:
+            todas_las_fechas = precios_dict[ticker].index
+        else:
+            todas_las_fechas = todas_las_fechas.union(precios_dict[ticker].index)
+    
+    todas_las_fechas = sorted([f for f in todas_las_fechas if f >= pd.Timestamp(fecha_inicio)])
+    
+    if not todas_las_fechas:
+        return pd.Series(dtype=float)
+    
+    # Comprar acciones en la fecha inicial
+    fecha_compra = todas_las_fechas[0]
+    acciones_por_ticker = {}
+    
+    for ticker, porcentaje in allocations.items():
+        if ticker in precios_dict and fecha_compra in precios_dict[ticker].index:
+            precio_compra = precios_dict[ticker].loc[fecha_compra]
+            if precio_compra > 0:
+                cantidad_invertir = monto_inicial * (porcentaje / 100)
+                acciones_por_ticker[ticker] = cantidad_invertir / precio_compra
+    
+    # Calcular valor día a día
+    valor_series = pd.Series(index=todas_las_fechas, dtype=float)
+    
+    for fecha in todas_las_fechas:
+        valor_total = 0.0
+        for ticker, num_acciones in acciones_por_ticker.items():
+            if ticker in precios_dict and fecha in precios_dict[ticker].index:
+                precio_actual = precios_dict[ticker].loc[fecha]
+                valor_total += num_acciones * precio_actual
+        
+        valor_series.loc[fecha] = ((valor_total / monto_inicial) - 1) * 100 if monto_inicial > 0 else 0
+    
+    return valor_series
+
+def calcular_metricas_avanzadas(rentabilidad_series, valores_series, inversion_series):
+    """Calcula métricas avanzadas de rendimiento"""
+    rentabilidad_clean = rentabilidad_series.dropna()
+    valores_clean = valores_series.dropna()
+    inversion_clean = inversion_series.dropna()
+    
+    if len(rentabilidad_clean) < 2:
+        return {}
+    
+    # Rentabilidad final
+    rentabilidad_total = rentabilidad_clean.iloc[-1]
+    
+    # Valor final vs inversión
+    valor_final = valores_clean.iloc[-1] if len(valores_clean) > 0 else 0
+    inversion_final = inversion_clean.iloc[-1] if len(inversion_clean) > 0 else 1
+    
+    # Calcular retornos diarios
+    retornos_diarios = rentabilidad_clean.pct_change().dropna()
+    
+    # Volatilidad (desviación estándar anualizada)
+    volatilidad = retornos_diarios.std() * np.sqrt(252) * 100 if len(retornos_diarios) > 0 else 0
+    
+    # Sharpe Ratio (asumiendo tasa libre de riesgo = 0)
+    retorno_medio_anual = retornos_diarios.mean() * 252 * 100 if len(retornos_diarios) > 0 else 0
+    sharpe_ratio = retorno_medio_anual / volatilidad if volatilidad > 0 else 0
+    
+    # Maximum Drawdown
+    valores_acumulados = valores_clean.cummax()
+    drawdowns = (valores_clean - valores_acumulados) / valores_acumulados * 100
+    max_drawdown = drawdowns.min() if len(drawdowns) > 0 else 0
+    
+    # CAGR (Compound Annual Growth Rate)
+    if inversion_final > 0 and len(rentabilidad_clean) > 30:
+        años = len(rentabilidad_clean) / 252  # Asumiendo días hábiles
+        cagr = (((valor_final / inversion_final) ** (1/años)) - 1) * 100 if años > 0 else 0
+    else:
+        cagr = 0
+    
+    # Mejor y peor año (aproximado)
+    rentabilidad_por_año = rentabilidad_clean.groupby(rentabilidad_clean.index.year).last()
+    if len(rentabilidad_por_año) > 1:
+        retornos_anuales = rentabilidad_por_año.diff().dropna()
+        mejor_año = retornos_anuales.max() if len(retornos_anuales) > 0 else 0
+        peor_año = retornos_anuales.min() if len(retornos_anuales) > 0 else 0
+    else:
+        mejor_año = peor_año = 0
+    
+    # Tiempo en positivo
+    dias_positivos = (rentabilidad_clean > 0).sum()
+    total_dias = len(rentabilidad_clean)
+    porcentaje_positivo = (dias_positivos / total_dias * 100) if total_dias > 0 else 0
+    
+    return {
+        'rentabilidad_total': rentabilidad_total,
+        'valor_final': valor_final,
+        'inversion_final': inversion_final,
+        'volatilidad': volatilidad,
+        'sharpe_ratio': sharpe_ratio,
+        'max_drawdown': max_drawdown,
+        'cagr': cagr,
+        'mejor_año': mejor_año,
+        'peor_año': peor_año,
+        'porcentaje_tiempo_positivo': porcentaje_positivo,
+        'ganancia_neta': valor_final - inversion_final
+    }
+
+def exportar_a_excel(resultados_portfolio, metricas):
+    """Exporta resultados a Excel con múltiples hojas"""
+    output = BytesIO()
+    
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        # Hoja 1: Resumen de métricas
+        df_metricas = pd.DataFrame([metricas])
+        df_metricas.to_excel(writer, sheet_name='Métricas', index=False)
+        
+        # Hoja 2: Evolución del portfolio
+        df_evolucion = pd.DataFrame({
+            'Fecha': resultados_portfolio['rentabilidad'].index,
+            'Rentabilidad (%)': resultados_portfolio['rentabilidad'].values,
+            'Valor Portfolio ($)': resultados_portfolio['valor_portfolio'].values,
+            'Inversión Acumulada ($)': resultados_portfolio['inversion_acumulada'].values
+        })
+        df_evolucion.to_excel(writer, sheet_name='Evolución', index=False)
+        
+        # Hoja 3: Detalles por activo
+        if 'detalles_por_ticker' in resultados_portfolio:
+            for ticker, datos in resultados_portfolio['detalles_por_ticker'].items():
+                df_ticker = pd.DataFrame({
+                    'Fecha': datos['acciones'].index,
+                    'Acciones': datos['acciones'].values,
+                    'Valor ($)': datos['valor'].values
+                })
+                df_ticker.to_excel(writer, sheet_name=f'Activo_{ticker}', index=False)
+    
+    output.seek(0)
+    return output
+
+# ============================================================================
+# INTERFAZ SIDEBAR
+# ============================================================================
+
 st.sidebar.markdown("## ⚙️ Configuración de Análisis")
 
-# Selector de fechas con diseño mejorado
-st.sidebar.markdown("### 📅 Rango de Fechas")
-col1, col2 = st.sidebar.columns(2)
-with col1:
-    fecha_inicio = st.date_input(
-        "Inicio:",
-        value=datetime(2020, 1, 1),
-        min_value=datetime(2015, 1, 1),
-        max_value=datetime.now()
-    )
-with col2:
-    fecha_fin = st.date_input(
-        "Fin:",
-        value=datetime.now(),
-        min_value=datetime(2015, 1, 1),
-        max_value=datetime.now()
-    )
+# Tabs para organizar mejor la configuración
+tab_basico, tab_avanzado, tab_portfolio = st.sidebar.tabs(["📊 Básico", "🎯 Avanzado", "💼 Portfolio"])
 
-# Inversión mensual con slider más visual
-st.sidebar.markdown("### 💰 Inversión Mensual")
-inversion_mensual = st.sidebar.select_slider(
-    "Cantidad ($):",
-    options=[50, 100, 200, 500, 1000, 2000, 5000],
-    value=100,
-    format_func=lambda x: f"${x:,}"
-)
-
-# Selección de activos con mejor UX
-st.sidebar.markdown("### 🎯 Selección de Activos")
-
-# Activos predefinidos con emojis
-activos_con_emoji = {
-    ticker: f"{info['emoji']} {ticker} - {info['nombre'][:20]}..." 
-    for ticker, info in ACTIVOS_PREDEFINIDOS.items()
-}
-
-activos_seleccionados = st.sidebar.multiselect(
-    "Activos a analizar:",
-    options=list(ACTIVOS_PREDEFINIDOS.keys()),
-    default=['SPY', 'QQQ', 'VTI'],
-    format_func=lambda x: activos_con_emoji[x]
-)
-
-# Activos personalizados
-with st.sidebar.expander("➕ Agregar activos personalizados"):
-    activos_custom = st.text_input(
-        "Tickers (separados por comas):",
-        placeholder="TSLA, NVDA, AMZN"
+with tab_basico:
+    st.markdown("### 📅 Rango de Fechas")
+    col1, col2 = st.columns(2)
+    with col1:
+        fecha_inicio = st.date_input(
+            "Inicio:",
+            value=datetime(2020, 1, 1),
+            min_value=datetime(2015, 1, 1),
+            max_value=datetime.now()
+        )
+    with col2:
+        fecha_fin = st.date_input(
+            "Fin:",
+            value=datetime.now(),
+            min_value=datetime(2015, 1, 1),
+            max_value=datetime.now()
+        )
+    
+    # Configuración de frecuencia de inversión
+    st.markdown("### 🗓️ Frecuencia de Inversión")
+    frecuencia_dca = st.selectbox(
+        "Frecuencia:",
+        ['monthly', 'biweekly', 'weekly', 'quarterly', 'daily'],
+        format_func=lambda x: {
+            'daily': '📆 Diaria (días hábiles)',
+            'weekly': '📅 Semanal',
+            'biweekly': '📊 Quincenal',
+            'monthly': '📈 Mensual',
+            'quarterly': '📉 Trimestral'
+        }[x],
+        index=0
     )
     
-    if activos_custom:
-        custom_list = [ticker.strip().upper() for ticker in activos_custom.split(',') if ticker.strip()]
-        activos_seleccionados.extend(custom_list)
+    # Opciones específicas según frecuencia
+    dias_especificos = None
+    dia_semana = None
+    
+    if frecuencia_dca == 'monthly':
+        st.markdown("**Días del mes para invertir:**")
+        usar_dias_especificos = st.checkbox("Usar días específicos", value=False)
+        
+        if usar_dias_especificos:
+            dias_mes = st.multiselect(
+                "Selecciona días:",
+                options=list(range(1, 32)),
+                default=[1, 15],
+                format_func=lambda x: f"Día {x}"
+            )
+            dias_especificos = dias_mes if dias_mes else [1]
+    
+    elif frecuencia_dca == 'weekly':
+        dia_semana = st.selectbox(
+            "Día de la semana:",
+            options=list(range(7)),
+            format_func=lambda x: ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'][x],
+            index=0
+        )
+    
+    st.markdown("### 💰 Inversión por Período")
+    inversion_por_periodo = st.select_slider(
+        "Cantidad ($):",
+        options=[50, 100, 200, 500, 1000, 2000, 5000, 10000],
+        value=500,
+        format_func=lambda x: f"${x:,}"
+    )
 
-# Configuración de animación
-st.sidebar.markdown("### 🎬 Controles de Animación")
+with tab_avanzado:
+    st.markdown("### 💵 Inversión Inicial (Lump Sum)")
+    usar_lump_sum = st.checkbox("Agregar inversión inicial", value=False)
+    lump_sum_amount = 0
+    if usar_lump_sum:
+        lump_sum_amount = st.number_input(
+            "Monto inicial ($):",
+            min_value=0,
+            max_value=1000000,
+            value=1000,
+            step=100
+        )
+    
+    st.markdown("### 📈 Aumentos Anuales")
+    usar_aumentos = st.checkbox("Aplicar aumentos anuales", value=False)
+    aumento_anual = 0
+    if usar_aumentos:
+        aumento_anual = st.slider(
+            "% de aumento anual:",
+            min_value=0,
+            max_value=20,
+            value=5,
+            step=1,
+            format="%d%%"
+        )
+    
+    st.markdown("### ⏸️ Períodos de Pausa")
+    usar_pausas = st.checkbox("Pausar inversiones en períodos específicos", value=False)
+    pausas = []
+    if usar_pausas:
+        st.info("💡 Simula períodos sin inversión (ej: crisis, cambio de trabajo)")
+        num_pausas = st.number_input("Número de pausas:", min_value=1, max_value=5, value=1)
+        
+        for i in range(num_pausas):
+            col1, col2 = st.columns(2)
+            with col1:
+                inicio_pausa = st.date_input(
+                    f"Inicio pausa {i+1}:",
+                    value=datetime(2022, 1, 1),
+                    key=f"pausa_inicio_{i}"
+                )
+            with col2:
+                fin_pausa = st.date_input(
+                    f"Fin pausa {i+1}:",
+                    value=datetime(2022, 6, 30),
+                    key=f"pausa_fin_{i}"
+                )
+            pausas.append((inicio_pausa, fin_pausa))
+    
+    st.markdown("### 📊 Comparaciones")
+    comparar_lump_sum = st.checkbox("Comparar con inversión Lump Sum", value=True)
+    
+    st.markdown("### 🎲 Simulación Monte Carlo")
+    usar_monte_carlo = st.checkbox("Ejecutar simulación Monte Carlo", value=False)
+    if usar_monte_carlo:
+        num_simulaciones = st.slider("Número de simulaciones:", 100, 10000, 1000, 100)
+
+with tab_portfolio:
+    st.markdown("### 💼 Gestión de Portfolio")
+    
+    # Selección de preset o custom
+    modo_portfolio = st.radio(
+        "Modo de configuración:",
+        ['Presets', 'Personalizado'],
+        horizontal=True
+    )
+    
+    allocations = {}
+    
+    if modo_portfolio == 'Presets':
+        preset_seleccionado = st.selectbox(
+            "Selecciona un portfolio predefinido:",
+            list(PORTFOLIO_PRESETS.keys()),
+            format_func=lambda x: f"{x} - {PORTFOLIO_PRESETS[x]['descripcion']}"
+        )
+        
+        allocations = PORTFOLIO_PRESETS[preset_seleccionado]['allocations'].copy()
+        
+        st.markdown("**📊 Asignación:**")
+        for ticker, pct in allocations.items():
+            emoji = ACTIVOS_PREDEFINIDOS.get(ticker, {}).get('emoji', '📈')
+            st.markdown(f"{emoji} **{ticker}**: {pct}%")
+    
+    else:  # Personalizado
+        st.markdown("**Selecciona activos y asigna porcentajes:**")
+        
+        # Selector de activos
+        activos_seleccionados = st.multiselect(
+            "Activos:",
+            options=list(ACTIVOS_PREDEFINIDOS.keys()),
+            default=['SPY', 'BND'],
+            format_func=lambda x: f"{ACTIVOS_PREDEFINIDOS[x]['emoji']} {x} - {ACTIVOS_PREDEFINIDOS[x]['nombre'][:25]}"
+        )
+        
+        # Activos custom
+        with st.expander("➕ Agregar activos personalizados"):
+            activos_custom = st.text_input(
+                "Tickers (separados por comas):",
+                placeholder="TSLA, NVDA, AMZN"
+            )
+            
+            if activos_custom:
+                custom_list = [ticker.strip().upper() for ticker in activos_custom.split(',') if ticker.strip()]
+                activos_seleccionados.extend(custom_list)
+        
+        # Asignar porcentajes
+        if activos_seleccionados:
+            st.markdown("**Asigna porcentajes:**")
+            
+            total_asignado = 0
+            for ticker in activos_seleccionados:
+                emoji = ACTIVOS_PREDEFINIDOS.get(ticker, {}).get('emoji', '📈')
+                pct = st.slider(
+                    f"{emoji} {ticker}:",
+                    min_value=0,
+                    max_value=100,
+                    value=100 // len(activos_seleccionados),
+                    step=5,
+                    key=f"alloc_{ticker}"
+                )
+                allocations[ticker] = pct
+                total_asignado += pct
+            
+            # Mostrar total
+            if total_asignado != 100:
+                st.warning(f"⚠️ Total asignado: {total_asignado}% (se normalizará automáticamente)")
+            else:
+                st.success(f"✅ Total asignado: {total_asignado}%")
+    
+    # Guardar/Cargar configuraciones
+    st.markdown("### 💾 Guardar/Cargar")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("💾 Guardar Config"):
+            config_actual = {
+                'allocations': allocations,
+                'inversion': inversion_por_periodo,
+                'frecuencia': frecuencia_dca,
+                'lump_sum': lump_sum_amount,
+                'aumentos': aumento_anual
+            }
+            st.session_state.config_guardada = config_actual
+            st.success("✅ Guardado!")
+    
+    with col2:
+        if st.button("📥 Cargar Config"):
+            if 'config_guardada' in st.session_state:
+                st.info("✅ Config cargada!")
+            else:
+                st.warning("No hay config guardada")
+
+# ============================================================================
+# CONTROLES DE VISUALIZACIÓN
+# ============================================================================
+
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 🎬 Visualización")
+
 velocidad_animacion = st.sidebar.select_slider(
-    "Velocidad:",
+    "Velocidad animación:",
     options=["🐌 Muy Lenta", "🚶 Lenta", "🏃 Normal", "🚀 Rápida", "⚡ Muy Rápida"],
     value="🏃 Normal"
 )
 
-# Mapear velocidades a delays - Velocidades más optimizadas
 velocidad_map = {
     "🐌 Muy Lenta": 0.08,
     "🚶 Lenta": 0.05,
@@ -255,46 +739,112 @@ velocidad_map = {
     "⚡ Muy Rápida": 0.01
 }
 
-# Opciones de visualización
-mostrar_marcadores_inversion = st.sidebar.checkbox("📍 Mostrar días de inversión", value=True)
-mostrar_grid = st.sidebar.checkbox("📊 Mostrar grid", value=True)
+mostrar_marcadores = st.sidebar.checkbox("📍 Marcadores de inversión", value=True)
+mostrar_grid = st.sidebar.checkbox("📊 Grid", value=True)
 tema_oscuro = st.sidebar.checkbox("🌙 Tema oscuro", value=True)
+suavizado = st.sidebar.checkbox("🌊 Suavizado", value=True)
 
-# Nueva opción: Suavizado de curvas
-suavizado_curvas = st.sidebar.checkbox("🌊 Suavizado de curvas", value=True)
+# ============================================================================
+# BOTÓN DE ANÁLISIS
+# ============================================================================
 
-# Botón principal de análisis
-if len(activos_seleccionados) > 0:
-    if st.sidebar.button("🚀 Iniciar Análisis", type="primary"):
+st.sidebar.markdown("---")
+
+if allocations:
+    if st.sidebar.button("🚀 Iniciar Análisis Pro", type="primary", use_container_width=True):
+        # Generar fechas de inversión
+        fechas_inversion = generar_fechas_inversion(
+            fecha_inicio,
+            fecha_fin,
+            frecuencia=frecuencia_dca,
+            dias_especificos=dias_especificos,
+            dia_semana=dia_semana,
+            fechas_pausa=pausas if usar_pausas else None
+        )
+        
+        # Guardar en session state
         st.session_state.analisis_iniciado = True
-        st.session_state.activos_analizar = activos_seleccionados.copy()
-        st.session_state.fecha_inicio_analisis = fecha_inicio
-        st.session_state.fecha_fin_analisis = fecha_fin
-        st.session_state.inversion_analisis = inversion_mensual
+        st.session_state.config_analisis = {
+            'allocations': allocations,
+            'inversion_total': inversion_por_periodo,
+            'fechas_inversion': fechas_inversion,
+            'lump_sum': lump_sum_amount,
+            'aumentos_anuales': aumento_anual,
+            'fecha_inicio': fecha_inicio,
+            'fecha_fin': fecha_fin,
+            'comparar_lump_sum': comparar_lump_sum,
+            'usar_monte_carlo': usar_monte_carlo
+        }
+        st.rerun()
 
-# Función optimizada para crear gráfico sin flickering
-def crear_grafico_ultra_suave(rentabilidades, inversiones_acumuladas, hasta_indice=None, tema_oscuro=True, mostrar_grid=True, suavizado=True):
-    """Crea gráfico optimizado para animación sin flickering"""
-    
-    # Configurar template
+# ============================================================================
+# FUNCIONES DE GRAFICACIÓN
+# ============================================================================
+
+def crear_grafico_portfolio(resultados, config, tema_oscuro=True, mostrar_grid=True):
+    """Crea gráfico principal del portfolio"""
     template = "plotly_dark" if tema_oscuro else "plotly_white"
     
-    # Crear figura base una sola vez
     fig = go.Figure()
     
-    # Configurar layout fijo para evitar redimensionamiento
+    # Línea principal de rentabilidad
+    rent_data = resultados['rentabilidad'].dropna()
+    
+    fig.add_trace(go.Scatter(
+        x=rent_data.index,
+        y=rent_data.values,
+        mode='lines',
+        name='Portfolio DCA',
+        line=dict(color='#667eea', width=3),
+        fill='tonexty',
+        fillcolor='rgba(102, 126, 234, 0.1)',
+        hovertemplate='<b>Portfolio</b><br>Fecha: %{x|%d/%m/%Y}<br>Rentabilidad: %{y:.2f}%<extra></extra>'
+    ))
+    
+    # Comparación con lump sum si está habilitada
+    if config.get('comparar_lump_sum') and 'lump_sum_comparison' in resultados:
+        lump_data = resultados['lump_sum_comparison'].dropna()
+        if len(lump_data) > 0:
+            fig.add_trace(go.Scatter(
+                x=lump_data.index,
+                y=lump_data.values,
+                mode='lines',
+                name='Lump Sum',
+                line=dict(color='#ff6b6b', width=2, dash='dash'),
+                hovertemplate='<b>Lump Sum</b><br>Fecha: %{x|%d/%m/%Y}<br>Rentabilidad: %{y:.2f}%<extra></extra>'
+            ))
+    
+    # Marcadores de inversión
+    if mostrar_marcadores and config.get('fechas_inversion'):
+        fechas_inv = [f for f in config['fechas_inversion'] if f in rent_data.index]
+        if fechas_inv:
+            valores_inv = [rent_data.loc[f] for f in fechas_inv]
+            
+            fig.add_trace(go.Scatter(
+                x=fechas_inv[-20:],  # Últimos 20 para no saturar
+                y=valores_inv[-20:],
+                mode='markers',
+                name='Inversiones',
+                marker=dict(
+                    color='#ffd700',
+                    size=8,
+                    symbol='circle',
+                    line=dict(color='white', width=1)
+                ),
+                hovertemplate='<b>💰 Inversión</b><br>Fecha: %{x|%d/%m/%Y}<extra></extra>'
+            ))
+    
+    # Layout
     fig.update_layout(
         template=template,
-        height=500,  # Altura fija
-        width=None,  # Ancho responsivo pero sin cambios abruptos
+        height=500,
         title=dict(
-            text=f"📊 Evolución DCA Ultra-Suave - ${st.session_state.inversion_analisis:,}/mes",
+            text=f"📊 Evolución Portfolio DCA - ${config['inversion_total']:,}/período",
             x=0.5,
-            font=dict(size=18, color='white' if tema_oscuro else 'black'),
-            pad=dict(t=20)
+            font=dict(size=20)
         ),
         xaxis_title="📅 Fecha",
-        yaxis_title="💰 Rentabilidad Acumulada (%)",
+        yaxis_title="💰 Rentabilidad (%)",
         hovermode='x unified',
         showlegend=True,
         legend=dict(
@@ -302,479 +852,427 @@ def crear_grafico_ultra_suave(rentabilidades, inversiones_acumuladas, hasta_indi
             yanchor="bottom",
             y=1.02,
             xanchor="center",
-            x=0.5,
-            bgcolor="rgba(0,0,0,0.8)" if tema_oscuro else "rgba(255,255,255,0.8)"
+            x=0.5
         ),
-        xaxis=dict(
-            showgrid=mostrar_grid,
-            gridcolor='rgba(128,128,128,0.1)',
-            fixedrange=True,  # Evitar zoom automático
-            tickformat='%b %Y'
-        ),
-        yaxis=dict(
-            showgrid=mostrar_grid,
-            gridcolor='rgba(128,128,128,0.1)',
-            tickformat=".1f",
-            ticksuffix="%",
-            fixedrange=True,  # Evitar zoom automático
-            autorange=True
-        ),
+        xaxis=dict(showgrid=mostrar_grid, gridcolor='rgba(128,128,128,0.1)'),
+        yaxis=dict(showgrid=mostrar_grid, gridcolor='rgba(128,128,128,0.1)', ticksuffix="%"),
         plot_bgcolor='rgba(0,0,0,0)',
         paper_bgcolor='rgba(0,0,0,0)',
-        margin=dict(l=60, r=60, t=80, b=60),
-        # Configuraciones críticas para evitar flickering
-        uirevision='constant',  # Mantener estado UI constante
-        dragmode=False,  # Deshabilitar interactividad que cause redraws
-        # Optimizaciones de rendimiento
-        modebar={'remove': ['zoom', 'pan', 'select', 'lasso', 'zoomIn', 'zoomOut', 'autoScale', 'resetScale']},
     )
-    
-    # Preparar datos según índice actual
-    for ticker in rentabilidades.keys():
-        emoji = ACTIVOS_PREDEFINIDOS.get(ticker, {}).get('emoji', '📈')
-        color = ACTIVOS_PREDEFINIDOS.get(ticker, {}).get('color', '#1f77b4')
-        
-        # Obtener datos hasta el punto actual
-        datos_ticker = rentabilidades[ticker].dropna()
-        if len(datos_ticker) == 0:
-            continue
-            
-        # Filtrar datos según progreso de animación
-        if hasta_indice is not None:
-            if hasta_indice < len(datos_ticker):
-                datos_ticker = datos_ticker.iloc[:hasta_indice + 1]
-        
-        if len(datos_ticker) == 0:
-            continue
-        
-        # Línea principal optimizada
-        line_config = dict(
-            color=color,
-            width=3
-        )
-        
-        # Aplicar suavizado solo si está habilitado y hay suficientes puntos
-        if suavizado and len(datos_ticker) > 5:
-            line_config['smoothing'] = 1.0  # Suavizado conservador
-        
-        fig.add_trace(go.Scatter(
-            x=datos_ticker.index,
-            y=datos_ticker.values,
-            mode='lines',
-            name=f'{emoji} {ticker}',
-            line=line_config,
-            hovertemplate=f'<b>{ticker}</b><br>' +
-                        'Fecha: %{x|%d/%m/%Y}<br>' +
-                        'Rentabilidad: %{y:.1f}%<br>' +
-                        '<extra></extra>',
-            connectgaps=True,
-            # Optimización: usar less traces
-            showlegend=True
-        ))
-        
-        # Marcadores de inversión optimizados (solo si es necesario)
-        if mostrar_marcadores_inversion and ticker in inversiones_acumuladas and hasta_indice is not None:
-            inversiones_ticker = inversiones_acumuladas[ticker].dropna()
-            if len(inversiones_ticker) > 0:
-                # Detectar días de inversión de forma más eficiente
-                diff_inversiones = inversiones_ticker.diff()
-                dias_inversion = diff_inversiones[diff_inversiones > 0]
-                
-                # Filtrar según progreso
-                if hasta_indice < len(datos_ticker):
-                    fecha_limite = datos_ticker.index[hasta_indice]
-                    dias_inversion = dias_inversion[dias_inversion.index <= fecha_limite]
-                
-                if len(dias_inversion) > 0:
-                    # Solo últimos 3 marcadores para evitar saturación
-                    dias_recientes = dias_inversion.tail(3)
-                    valores_marcadores = datos_ticker.reindex(dias_recientes.index).dropna()
-                    
-                    if len(valores_marcadores) > 0:
-                        fig.add_trace(go.Scatter(
-                            x=valores_marcadores.index,
-                            y=valores_marcadores.values,
-                            mode='markers',
-                            name=f'{ticker}_markers',
-                            marker=dict(
-                                color=color,
-                                size=8,
-                                symbol='circle',
-                                line=dict(color='white', width=1.5),
-                                opacity=0.8
-                            ),
-                            showlegend=False,
-                            hovertemplate=f'<b>{ticker} - Compra</b><br>' +
-                                        'Fecha: %{x|%d/%m/%Y}<br>' +
-                                        f'💰 ${st.session_state.inversion_analisis:,}<br>' +
-                                        '<extra></extra>'
-                        ))
     
     return fig
 
-# Área principal
-if 'analisis_iniciado' in st.session_state and st.session_state.analisis_iniciado:
-    # Descargar datos
-    precios = descargar_datos_yfinance(
-        st.session_state.activos_analizar, 
-        st.session_state.fecha_inicio_analisis, 
-        st.session_state.fecha_fin_analisis
+def crear_grafico_composicion(resultados_portfolio, allocations):
+    """Crea gráfico de composición del portfolio"""
+    detalles = resultados_portfolio.get('detalles_por_ticker', {})
+    
+    if not detalles:
+        return None
+    
+    # Obtener valores finales
+    valores_finales = {}
+    for ticker, datos in detalles.items():
+        valor_final = datos['valor'].dropna().iloc[-1] if len(datos['valor'].dropna()) > 0 else 0
+        valores_finales[ticker] = valor_final
+    
+    # Crear pie chart
+    labels = [f"{ACTIVOS_PREDEFINIDOS.get(t, {}).get('emoji', '📈')} {t}" for t in valores_finales.keys()]
+    values = list(valores_finales.values())
+    colors = [ACTIVOS_PREDEFINIDOS.get(t, {}).get('color', '#1f77b4') for t in valores_finales.keys()]
+    
+    fig = go.Figure(data=[go.Pie(
+        labels=labels,
+        values=values,
+        marker=dict(colors=colors),
+        textinfo='label+percent',
+        hovertemplate='<b>%{label}</b><br>Valor: $%{value:,.0f}<br>Porcentaje: %{percent}<extra></extra>'
+    )])
+    
+    fig.update_layout(
+        title="🥧 Composición del Portfolio (Valor Final)",
+        height=400,
+        showlegend=True
     )
     
-    if precios is not None:
-        st.success(f"✅ Datos descargados exitosamente para {len(st.session_state.activos_analizar)} activos")
-        
-        # Calcular rentabilidades para todos los activos
-        rentabilidades = {}
-        valores_portfolio = {}
-        inversiones_acumuladas = {}
-        
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        
-        for i, ticker in enumerate(st.session_state.activos_analizar):
-            status_text.text(f"Calculando DCA para {ticker}...")
-            
-            if ticker in precios.columns:
-                rent, valor, inversion = calcular_dca_detallado(
-                    precios[ticker], 
-                    st.session_state.inversion_analisis
-                )
-                
-                if len(rent.dropna()) > 0:
-                    rentabilidades[ticker] = rent
-                    valores_portfolio[ticker] = valor
-                    inversiones_acumuladas[ticker] = inversion
-            
-            progress_bar.progress((i + 1) / len(st.session_state.activos_analizar))
-        
-        progress_bar.empty()
-        status_text.empty()
-        
-        if rentabilidades:
-            # Crear el gráfico principal
-            st.markdown("## 📈 Evolución de Rentabilidad DCA")
-            
-            # Controles de animación
-            col1, col2, col3 = st.columns([1, 1, 1])
-            
-            with col1:
-                if st.button("▶️ Reproducir Ultra-Suave", type="primary"):
-                    st.session_state.reproducir_animacion = True
-            
-            with col2:
-                if st.button("⏸️ Pausar"):
-                    st.session_state.reproducir_animacion = False
-            
-            with col3:
-                if st.button("📊 Ver Final"):
-                    st.session_state.mostrar_final = True
-            
-            # Crear contenedor fijo para el gráfico
-            chart_placeholder = st.empty()
-            
-            # Animación ultra-suave sin flickering
-            if 'reproducir_animacion' in st.session_state and st.session_state.reproducir_animacion:
-                st.session_state.reproducir_animacion = False  # Reset
-                
-                # Encontrar la longitud común mínima
-                min_length = min([len(rent.dropna()) for rent in rentabilidades.values()])
-                
-                if min_length == 0:
-                    st.error("No hay datos suficientes para la animación")
-                else:
-                    st.info("🎬 Iniciando animación")
-                    
-                    # MÉTODO ALTERNATIVO 1: Animación con actualización de contenedor
-                    with chart_placeholder.container():
-                        st.markdown("**🎬 Animación en progreso...**")
-                        progress_bar = st.progress(0)
-                        chart_area = st.empty()
-                        
-                        # Preparar frames de animación optimizados
-                        total_frames = min(80, min_length)  # Reducido para mayor fluidez
-                        frame_step = max(1, min_length // total_frames)
-                        
-                        # Pre-calcular datos para evitar cálculos durante animación
-                        all_dates = []
-                        all_values = []
-                        for rent in rentabilidades.values():
-                            clean_data = rent.dropna()
-                            if len(clean_data) > 0:
-                                all_dates.extend(clean_data.index.tolist())
-                                all_values.extend(clean_data.values.tolist())
-                        
-                        x_range = [min(all_dates), max(all_dates)] if all_dates else None
-                        y_range = [min(all_values) * 1.1, max(all_values) * 1.1] if all_values else None
-                        
-                        # Animación frame por frame con contenedor único
-                        for frame_idx in range(total_frames):
-                            data_index = min(frame_idx * frame_step, min_length - 1)
-                            
-                            # Crear figura optimizada
-                            fig_frame = crear_grafico_ultra_suave(
-                                rentabilidades,
-                                inversiones_acumuladas,
-                                hasta_indice=data_index,
-                                tema_oscuro=tema_oscuro,
-                                mostrar_grid=mostrar_grid,
-                                suavizado=suavizado_curvas
-                            )
-                            
-                            # Fijar rangos para evitar reescalado (clave anti-flickering)
-                            if x_range and y_range:
-                                fig_frame.update_layout(
-                                    xaxis=dict(range=x_range, fixedrange=True),
-                                    yaxis=dict(range=y_range, fixedrange=True)
-                                )
-                            
-                            # Indicador de fecha actual
-                            if len(all_dates) > data_index:
-                                try:
-                                    current_date = list(rentabilidades.values())[0].dropna().index[data_index]
-                                    fig_frame.add_annotation(
-                                        text=f"📅 {current_date.strftime('%b %Y')}",
-                                        xref="paper", yref="paper",
-                                        x=0.02, y=0.02,
-                                        showarrow=False,
-                                        font=dict(size=12, color="rgba(255,255,255,0.8)"),
-                                        bgcolor="rgba(0,0,0,0.3)",
-                                        borderwidth=0,
-                                        borderpad=5
-                                    )
-                                except IndexError:
-                                    pass  # Continuar si hay error de índice
-                            
-                            # Actualizar usando el área de chart con key dinámico
-                            # Esto evita conflictos de key pero mantiene fluidez visual
-                            with chart_area:
-                                st.plotly_chart(
-                                    fig_frame,
-                                    use_container_width=True,
-                                    config={'displayModeBar': False, 'responsive': True},
-                                    key=f"anim_{frame_idx}_{hash(str(data_index))}"  # Key único y predecible
-                                )
-                            
-                            # Actualizar progreso
-                            progress_bar.progress((frame_idx + 1) / total_frames)
-                            
-                            # Delay optimizado para suavidad
-                            time.sleep(velocidad_map[velocidad_animacion])
-                        
-                        # Limpiar y mostrar resultado final
-                        progress_bar.empty()
-                        
-                        # Crear gráfico final optimizado
-                        fig_final = crear_grafico_ultra_suave(
-                            rentabilidades,
-                            inversiones_acumuladas,
-                            hasta_indice=None,
-                            tema_oscuro=tema_oscuro,
-                            mostrar_grid=mostrar_grid,
-                            suavizado=suavizado_curvas
-                        )
-                        
-                        fig_final.update_layout(
-                            title=dict(text="🎉 Evolución Completa - Animación Ultra-Suave Finalizada"),
-                            annotations=[
-                                dict(
-                                    text="✨ Animación completada.",
-                                    xref="paper", yref="paper",
-                                    x=0.5, y=0.95,
-                                    showarrow=False,
-                                    font=dict(size=14, color="green"),
-                                    bgcolor="rgba(0,255,0,0.1)",
-                                    bordercolor="green",
-                                    borderwidth=1,
-                                    borderpad=8
-                                )
-                            ]
-                        )
-                        
-                        # Mostrar resultado final con key único
-                        with chart_area:
-                            st.plotly_chart(
-                                fig_final,
-                                use_container_width=True,
-                                key="final_smooth_chart"
-                            )
-                        
-                        st.success("🎉 ¡Animación completada!")
-            
-            elif 'mostrar_final' in st.session_state and st.session_state.mostrar_final:
-                st.session_state.mostrar_final = False  # Reset
-                
-                # Mostrar gráfico final estático
-                fig_estatico = crear_grafico_ultra_suave(
-                    rentabilidades,
-                    inversiones_acumuladas,
-                    hasta_indice=None,
-                    tema_oscuro=tema_oscuro,
-                    mostrar_grid=mostrar_grid,
-                    suavizado=suavizado_curvas
-                )
-                
-                chart_placeholder.plotly_chart(fig_estatico, use_container_width=True)
-            
-            # Métricas finales elegantes
-            st.markdown("## 🏆 Resultados Finales")
-            
-            # Preparar datos para métricas
-            metricas_finales = []
-            
-            for ticker in rentabilidades.keys():
-                rentabilidad_final = rentabilidades[ticker].dropna()
-                valor_portfolio_final = valores_portfolio[ticker].dropna() if ticker in valores_portfolio else pd.Series()
-                inversion_total_final = inversiones_acumuladas[ticker].dropna() if ticker in inversiones_acumuladas else pd.Series()
-                
-                if len(rentabilidad_final) > 0:
-                    rent_final_val = rentabilidad_final.iloc[-1]
-                    valor_final_val = valor_portfolio_final.iloc[-1] if len(valor_portfolio_final) > 0 else 0
-                    inv_final_val = inversion_total_final.iloc[-1] if len(inversion_total_final) > 0 else 0
-                    
-                    # Calcular ganancia/pérdida neta
-                    ganancia_neta = valor_final_val - inv_final_val
-                    
-                    metricas_finales.append({
-                        'ticker': ticker,
-                        'rentabilidad': rent_final_val,
-                        'valor_final': valor_final_val,
-                        'inversion_total': inv_final_val,
-                        'ganancia_neta': ganancia_neta
-                    })
-            
-            # Ordenar por rentabilidad (mejor primero)
-            metricas_finales.sort(key=lambda x: x['rentabilidad'], reverse=True)
-            
-            # Mostrar métricas en columnas con formato mejorado
-            cols_metricas = st.columns(min(len(metricas_finales), 3))
-            
-            for i, metrica in enumerate(metricas_finales):
-                ticker = metrica['ticker']
-                with cols_metricas[i % 3]:
-                    emoji = ACTIVOS_PREDEFINIDOS.get(ticker, {}).get('emoji', '📈')
-                    color = ACTIVOS_PREDEFINIDOS.get(ticker, {}).get('color', '#1f77b4')
-                    
-                    # Usar métricas nativas de Streamlit
-                    st.markdown(f"### {emoji} {ticker}")
-                    
-                    # Métrica principal
-                    col1, col2 = st.columns([2, 1])
-                    with col1:
-                        st.metric(
-                            label="Rentabilidad",
-                            value=f"{metrica['rentabilidad']:+.1f}%",
-                            delta=f"${metrica['ganancia_neta']:+,.0f}"
-                        )
-                    
-                    with col2:
-                        # Indicador visual de performance
-                        if metrica['rentabilidad'] >= 0:
-                            st.success("✅ Positivo")
-                        else:
-                            st.error("❌ Negativo")
-                    
-                    # Información adicional
-                    st.info(f"""
-                    **💰 Valor Final:** ${metrica['valor_final']:,.0f}
-                    
-                    **📊 Total Invertido:** ${metrica['inversion_total']:,.0f}
-                    
-                    **📈 ROI:** {((metrica['valor_final'] / metrica['inversion_total']) - 1) * 100:.1f}%
-                    """)
-                    
-                    st.markdown("---")
-                
-                # Nueva fila cada 3 elementos
-                if (i + 1) % 3 == 0 and i + 1 < len(metricas_finales):
-                    cols_metricas = st.columns(min(len(metricas_finales) - i - 1, 3))
+    return fig
 
+def crear_grafico_drawdown(resultados_portfolio):
+    """Crea gráfico de drawdown"""
+    valores = resultados_portfolio['valor_portfolio'].dropna()
+    
+    if len(valores) < 2:
+        return None
+    
+    # Calcular drawdown
+    valores_maximos = valores.cummax()
+    drawdown = (valores - valores_maximos) / valores_maximos * 100
+    
+    fig = go.Figure()
+    
+    fig.add_trace(go.Scatter(
+        x=drawdown.index,
+        y=drawdown.values,
+        mode='lines',
+        name='Drawdown',
+        line=dict(color='#ff6b6b', width=2),
+        fill='tozeroy',
+        fillcolor='rgba(255, 107, 107, 0.3)',
+        hovertemplate='Fecha: %{x|%d/%m/%Y}<br>Drawdown: %{y:.2f}%<extra></extra>'
+    ))
+    
+    fig.update_layout(
+        title="📉 Drawdown del Portfolio",
+        xaxis_title="Fecha",
+        yaxis_title="Drawdown (%)",
+        height=350,
+        hovermode='x unified',
+        yaxis=dict(ticksuffix="%"),
+        showlegend=False
+    )
+    
+    return fig
+
+# ============================================================================
+# ÁREA PRINCIPAL
+# ============================================================================
+
+if 'analisis_iniciado' in st.session_state and st.session_state.analisis_iniciado:
+    config = st.session_state.config_analisis
+    
+    # Descargar datos
+    tickers_necesarios = list(config['allocations'].keys())
+    precios = descargar_datos_yfinance(tickers_necesarios, config['fecha_inicio'], config['fecha_fin'])
+    
+    if precios is not None and len(precios) > 0:
+        st.success(f"✅ Datos descargados para {len(tickers_necesarios)} activos")
+        
+        # Preparar diccionario de precios
+        precios_dict = {}
+        for ticker in tickers_necesarios:
+            if ticker in precios.columns:
+                precios_dict[ticker] = precios[ticker]
+            elif len(tickers_necesarios) == 1:
+                precios_dict[ticker] = precios
+        
+        # Calcular DCA portfolio
+        with st.spinner("🔄 Calculando estrategia DCA..."):
+            resultados_portfolio = calcular_dca_portfolio_avanzado(precios_dict, config)
+        
+        # Calcular comparación lump sum si está habilitada
+        if config.get('comparar_lump_sum'):
+            inversion_total_final = resultados_portfolio['inversion_acumulada'].dropna().iloc[-1] if len(resultados_portfolio['inversion_acumulada'].dropna()) > 0 else 10000
             
-            # Resumen general
-            if len(metricas_finales) > 1:
-                st.markdown("### 📈 Resumen del Portfolio")
+            lump_sum_comp = calcular_lump_sum_comparison(
+                precios_dict,
+                config['allocations'],
+                inversion_total_final,
+                config['fecha_inicio']
+            )
+            resultados_portfolio['lump_sum_comparison'] = lump_sum_comp
+        
+        # Calcular métricas avanzadas
+        metricas = calcular_metricas_avanzadas(
+            resultados_portfolio['rentabilidad'],
+            resultados_portfolio['valor_portfolio'],
+            resultados_portfolio['inversion_acumulada']
+        )
+        
+        # ====================================================================
+        # VISUALIZACIÓN DE RESULTADOS
+        # ====================================================================
+        
+        st.markdown("## 📊 Resultados del Análisis")
+        
+        # Métricas principales en cards
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric(
+                "🎯 Rentabilidad Total",
+                f"{metricas.get('rentabilidad_total', 0):.2f}%",
+                delta=f"${metricas.get('ganancia_neta', 0):,.0f}"
+            )
+        
+        with col2:
+            st.metric(
+                "💰 Valor Final",
+                f"${metricas.get('valor_final', 0):,.0f}"
+            )
+        
+        with col3:
+            st.metric(
+                "📊 CAGR",
+                f"{metricas.get('cagr', 0):.2f}%"
+            )
+        
+        with col4:
+            st.metric(
+                "⚡ Sharpe Ratio",
+                f"{metricas.get('sharpe_ratio', 0):.2f}"
+            )
+        
+        # Métricas adicionales
+        st.markdown("### 📈 Métricas Avanzadas")
+        
+        col1, col2, col3, col4, col5 = st.columns(5)
+        
+        with col1:
+            st.metric("📊 Total Invertido", f"${metricas.get('inversion_final', 0):,.0f}")
+        
+        with col2:
+            st.metric("📉 Max Drawdown", f"{metricas.get('max_drawdown', 0):.2f}%")
+        
+        with col3:
+            st.metric("📊 Volatilidad", f"{metricas.get('volatilidad', 0):.2f}%")
+        
+        with col4:
+            st.metric("✅ Días Positivos", f"{metricas.get('porcentaje_tiempo_positivo', 0):.1f}%")
+        
+        with col5:
+            num_inversiones = len(config.get('fechas_inversion', []))
+            st.metric("🔢 # Inversiones", f"{num_inversiones}")
+        
+        # Tabs para diferentes vistas
+        tab1, tab2, tab3, tab4 = st.tabs(["📈 Evolución", "🥧 Composición", "📊 Análisis", "💾 Exportar"])
+        
+        with tab1:
+            # Gráfico principal
+            fig_main = crear_grafico_portfolio(resultados_portfolio, config, tema_oscuro, mostrar_grid)
+            st.plotly_chart(fig_main, use_container_width=True)
+            
+            # Comparación DCA vs Lump Sum
+            if config.get('comparar_lump_sum') and 'lump_sum_comparison' in resultados_portfolio:
+                st.markdown("### 🔄 Comparación: DCA vs Lump Sum")
                 
-                # Calcular métricas del portfolio conjunto
-                valor_total_final = sum([m['valor_final'] for m in metricas_finales])
-                inversion_total_final = sum([m['inversion_total'] for m in metricas_finales])
-                ganancia_total = valor_total_final - inversion_total_final
-                rentabilidad_portfolio = ((valor_total_final / inversion_total_final) - 1) * 100 if inversion_total_final > 0 else 0
+                lump_rent_final = resultados_portfolio['lump_sum_comparison'].dropna().iloc[-1] if len(resultados_portfolio['lump_sum_comparison'].dropna()) > 0 else 0
+                dca_rent_final = metricas.get('rentabilidad_total', 0)
+                diferencia = dca_rent_final - lump_rent_final
                 
-                col1, col2, col3, col4 = st.columns(4)
+                col1, col2, col3 = st.columns(3)
                 
                 with col1:
-                    st.metric(
-                        "🎯 Rentabilidad Total",
-                        f"{rentabilidad_portfolio:.1f}%",
-                        f"${ganancia_total:+,.0f}"
-                    )
+                    st.metric("DCA", f"{dca_rent_final:.2f}%")
                 
                 with col2:
-                    st.metric(
-                        "💰 Valor Final",
-                        f"${valor_total_final:,.0f}"
-                    )
+                    st.metric("Lump Sum", f"{lump_rent_final:.2f}%")
                 
                 with col3:
-                    st.metric(
-                        "📊 Total Invertido",
-                        f"${inversion_total_final:,.0f}"
-                    )
-                
-                with col4:
-                    mejor_activo = max(metricas_finales, key=lambda x: x['rentabilidad'])
-                    st.metric(
-                        "🏆 Mejor Activo",
-                        mejor_activo['ticker'],
-                        f"{mejor_activo['rentabilidad']:+.1f}%"
-                    )
+                    st.metric("Diferencia", f"{diferencia:+.2f}%", 
+                             delta="DCA mejor" if diferencia > 0 else "Lump Sum mejor")
+        
+        with tab2:
+            # Gráfico de composición
+            fig_comp = crear_grafico_composicion(resultados_portfolio, config['allocations'])
+            if fig_comp:
+                st.plotly_chart(fig_comp, use_container_width=True)
             
-        else:
-            st.error("❌ No se pudieron calcular las rentabilidades para ningún activo.")
-            st.info("💡 Verifica que los tickers sean válidos y que haya datos disponibles para el rango de fechas seleccionado.")
+            # Tabla detallada por activo
+            st.markdown("### 📋 Detalle por Activo")
+            
+            detalles_tabla = []
+            for ticker, datos in resultados_portfolio.get('detalles_por_ticker', {}).items():
+                valor_final = datos['valor'].dropna().iloc[-1] if len(datos['valor'].dropna()) > 0 else 0
+                acciones_final = datos['acciones'].dropna().iloc[-1] if len(datos['acciones'].dropna()) > 0 else 0
+                
+                # Calcular precio promedio de compra
+                total_invertido_ticker = config['allocations'][ticker] / 100 * metricas.get('inversion_final', 0)
+                precio_promedio = total_invertido_ticker / acciones_final if acciones_final > 0 else 0
+                
+                # Precio actual
+                if ticker in precios_dict:
+                    precio_actual = precios_dict[ticker].dropna().iloc[-1] if len(precios_dict[ticker].dropna()) > 0 else 0
+                else:
+                    precio_actual = 0
+                
+                rentabilidad_ticker = ((precio_actual / precio_promedio) - 1) * 100 if precio_promedio > 0 else 0
+                
+                emoji = ACTIVOS_PREDEFINIDOS.get(ticker, {}).get('emoji', '📈')
+                
+                detalles_tabla.append({
+                    'Activo': f"{emoji} {ticker}",
+                    'Acciones': f"{acciones_final:.4f}",
+                    'Valor Final': f"${valor_final:,.2f}",
+                    'Precio Promedio': f"${precio_promedio:.2f}",
+                    'Precio Actual': f"${precio_actual:.2f}",
+                    'Rentabilidad': f"{rentabilidad_ticker:+.2f}%",
+                    'Asignación': f"{config['allocations'][ticker]}%"
+                })
+            
+            df_detalles = pd.DataFrame(detalles_tabla)
+            st.dataframe(df_detalles, use_container_width=True, hide_index=True)
+        
+        with tab3:
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                # Gráfico de drawdown
+                fig_dd = crear_grafico_drawdown(resultados_portfolio)
+                if fig_dd:
+                    st.plotly_chart(fig_dd, use_container_width=True)
+            
+            with col2:
+                # Resumen de métricas
+                st.markdown("### 📊 Resumen de Métricas")
+                
+                st.info(f"""
+                **Rendimiento:**
+                - Rentabilidad Total: {metricas.get('rentabilidad_total', 0):.2f}%
+                - CAGR: {metricas.get('cagr', 0):.2f}%
+                - Ganancia Neta: ${metricas.get('ganancia_neta', 0):,.0f}
+                
+                **Riesgo:**
+                - Volatilidad: {metricas.get('volatilidad', 0):.2f}%
+                - Max Drawdown: {metricas.get('max_drawdown', 0):.2f}%
+                - Sharpe Ratio: {metricas.get('sharpe_ratio', 0):.2f}
+                
+                **Consistencia:**
+                - Tiempo en positivo: {metricas.get('porcentaje_tiempo_positivo', 0):.1f}%
+                - Mejor año: {metricas.get('mejor_año', 0):+.2f}%
+                - Peor año: {metricas.get('peor_año', 0):+.2f}%
+                """)
+            
+            # Tabla de fechas de inversión
+            st.markdown("### 📅 Calendario de Inversiones")
+            
+            fechas_inv = config.get('fechas_inversion', [])
+            if fechas_inv:
+                # Agrupar por año y mes
+                fechas_por_periodo = {}
+                for fecha in fechas_inv[:50]:  # Mostrar primeras 50
+                    periodo = fecha.strftime('%Y-%m')
+                    if periodo not in fechas_por_periodo:
+                        fechas_por_periodo[periodo] = []
+                    fechas_por_periodo[periodo].append(fecha.strftime('%d/%m/%Y'))
+                
+                for periodo, fechas in list(fechas_por_periodo.items())[:12]:
+                    st.markdown(f"**{periodo}:** {', '.join(fechas)}")
+                
+                if len(fechas_inv) > 50:
+                    st.info(f"... y {len(fechas_inv) - 50} fechas más")
+        
+        with tab4:
+            st.markdown("### 💾 Exportar Resultados")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                # Exportar a Excel
+                excel_data = exportar_a_excel(resultados_portfolio, metricas)
+                
+                st.download_button(
+                    label="📥 Descargar Excel Completo",
+                    data=excel_data,
+                    file_name=f"analisis_dca_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+            
+            with col2:
+                # Exportar configuración
+                config_json = json.dumps({
+                    'allocations': config['allocations'],
+                    'inversion_por_periodo': config['inversion_total'],
+                    'lump_sum': config['lump_sum'],
+                    'aumentos_anuales': config['aumentos_anuales'],
+                    'fecha_inicio': str(config['fecha_inicio']),
+                    'fecha_fin': str(config['fecha_fin'])
+                }, indent=2)
+                
+                st.download_button(
+                    label="📋 Descargar Configuración (JSON)",
+                    data=config_json,
+                    file_name=f"config_dca_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                    mime="application/json"
+                )
+            
+            # Preview de datos
+            st.markdown("### 👀 Vista Previa de Datos")
+            
+            df_preview = pd.DataFrame({
+                'Fecha': resultados_portfolio['rentabilidad'].index[-20:],
+                'Rentabilidad (%)': resultados_portfolio['rentabilidad'].values[-20:],
+                'Valor ($)': resultados_portfolio['valor_portfolio'].values[-20:],
+                'Inversión ($)': resultados_portfolio['inversion_acumulada'].values[-20:]
+            })
+            
+            st.dataframe(df_preview, use_container_width=True, hide_index=True)
+    
+    else:
+        st.error("❌ No se pudieron descargar los datos. Verifica los tickers y el rango de fechas.")
 
 else:
-    # Pantalla de bienvenida elegante
+    # Pantalla de bienvenida
     st.markdown("""
     <div style="text-align: center; padding: 3rem; margin: 2rem 0;">
-        <h2 style="color: #667eea;">🎯 ¿Listo para visualizar tu estrategia DCA?</h2>
+        <h2 style="color: #667eea;">🎯 Bienvenido al Analizador DCA Pro v3.0</h2>
         <p style="font-size: 1.2rem; color: #888; margin: 1rem 0;">
-            Selecciona tus activos favoritos en el panel lateral y haz clic en "Iniciar Análisis" 
-            para ver una increíble animación de cómo evoluciona tu inversión día a día.
+            Analiza estrategias de Dollar Cost Averaging con configuración avanzada
         </p>
         <div style="margin: 2rem 0;">
-            <span style="font-size: 3rem;">📈📊💰</span>
-        </div>
-        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 1rem; border-radius: 10px; margin: 2rem auto; max-width: 500px;">
-            <h3 style="color: white; margin: 0;">✨ Nuevo: Animación Ultra-Suave</h3>
-            <p style="color: rgba(255,255,255,0.9); margin: 0.5rem 0 0 0;">
-                Experiencia de visualización completamente fluida.
-            </p>
+            <span style="font-size: 3rem;">📈💼🚀</span>
         </div>
     </div>
     """, unsafe_allow_html=True)
     
-    # Mostrar algunos ejemplos de activos disponibles
-    st.markdown("### 🌟 Algunos activos populares disponibles:")
+    # Características nuevas
+    st.markdown("### ✨ Nuevas Características v3.0")
     
-    cols_ejemplos = st.columns(5)
-    activos_ejemplo = list(ACTIVOS_PREDEFINIDOS.items())[:5]
+    col1, col2, col3 = st.columns(3)
     
-    for i, (ticker, info) in enumerate(activos_ejemplo):
-        with cols_ejemplos[i]:
+    with col1:
+        st.markdown("""
+        <div class="portfolio-preset">
+            <h4>🗓️ Scheduling Flexible</h4>
+            <ul>
+                <li>Inversión diaria, semanal, quincenal</li>
+                <li>Días específicos del mes</li>
+                <li>Períodos de pausa</li>
+            </ul>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown("""
+        <div class="portfolio-preset">
+            <h4>💼 Portfolio Management</h4>
+            <ul>
+                <li>Asignaciones personalizadas</li>
+                <li>Portfolios predefinidos</li>
+                <li>Rebalanceo automático</li>
+            </ul>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col3:
+        st.markdown("""
+        <div class="portfolio-preset">
+            <h4>📊 Analytics Avanzado</h4>
+            <ul>
+                <li>Sharpe Ratio & Volatilidad</li>
+                <li>DCA vs Lump Sum</li>
+                <li>Exportar a Excel</li>
+            </ul>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # Ejemplos de portfolios
+    st.markdown("### 🌟 Portfolios Predefinidos")
+    
+    cols = st.columns(len(PORTFOLIO_PRESETS))
+    
+    for i, (nombre, datos) in enumerate(PORTFOLIO_PRESETS.items()):
+        with cols[i]:
             st.markdown(f"""
-            <div style="text-align: center; padding: 1rem; border-radius: 10px; border: 1px solid {info['color']};">
-                <div style="font-size: 2rem;">{info['emoji']}</div>
-                <div style="font-weight: bold; color: {info['color']};">{ticker}</div>
-                <div style="font-size: 0.8rem; opacity: 0.8;">{info['nombre'][:15]}...</div>
+            <div style="text-align: center; padding: 1rem; border-radius: 10px; border: 2px solid #667eea; background: rgba(102, 126, 234, 0.05);">
+                <h4>{nombre}</h4>
+                <p style="font-size: 0.9rem; color: #888;">{datos['descripcion']}</p>
             </div>
             """, unsafe_allow_html=True)
 
-# Footer elegante
+# Footer
 st.markdown("---")
 st.markdown("""
 <div style="text-align: center; padding: 2rem; opacity: 0.7;">
-    <p>📊 <strong>DCA Evolution Visualizer v2.0</strong> | Ultra-Smooth Animation</p>
-    <p>💡 Visualiza el poder del Dollar Cost Averaging.</p>
+    <p>📊 <strong>BQuant-DCA Pro Visualizer v3.0</strong> | Advanced Portfolio Analysis</p>
+    <p>💡 Desarrollado por @Gsnchez | Datos por Yahoo Finance</p>
 </div>
 """, unsafe_allow_html=True)
