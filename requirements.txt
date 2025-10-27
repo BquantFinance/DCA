@@ -3,3 +3,4 @@ yfinance
 streamlit
 pandas
 numpy
+openpyxl
